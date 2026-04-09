@@ -1,0 +1,33 @@
+{
+  "initial_shape": [
+    2928,
+    18
+  ],
+  "timestamp": "2026-04-09T11:22:00.362417",
+  "final_shape": [
+    2928,
+    18
+  ],
+  "duplicates_removed": 0,
+  "missing_values_before": 816,
+  "missing_values_after": 816,
+  "outlier_summary": {
+    "avg_rainfall": 85,
+    "max_rainfall": 103,
+    "avg_temperature": 39,
+    "elevation": 145,
+    "ndvi": 12,
+    "slope": 74,
+    "soil_moisture": 177,
+    "banjir": 282,
+    "lat": 7
+  },
+  "engineered_features": [
+    "rainfall_soil_interaction",
+    "elevation_risk",
+    "vegetation_elevation_risk",
+    "extreme_weather",
+    "monsoon_season",
+    "urban_density_risk"
+  ]
+}

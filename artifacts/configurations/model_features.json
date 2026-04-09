@@ -1,0 +1,53 @@
+{
+  "feature_cols": [
+    "district",
+    "subdistrict",
+    "avg_rainfall",
+    "max_rainfall",
+    "avg_temperature",
+    "elevation",
+    "landcover_class",
+    "ndvi",
+    "slope",
+    "soil_moisture",
+    "year",
+    "month",
+    "rainfall_intensity",
+    "rainfall_risk",
+    "temp_anomaly",
+    "elevation_category",
+    "vegetation_health",
+    "slope_category",
+    "moisture_level",
+    "season",
+    "flood_risk_score",
+    "year_month"
+  ],
+  "categorical_cols": [
+    "district",
+    "subdistrict",
+    "landcover_class",
+    "rainfall_intensity",
+    "elevation_category",
+    "vegetation_health",
+    "slope_category",
+    "moisture_level",
+    "season",
+    "year_month"
+  ],
+  "numerical_cols": [
+    "avg_rainfall",
+    "max_rainfall",
+    "avg_temperature",
+    "elevation",
+    "ndvi",
+    "slope",
+    "soil_moisture",
+    "year",
+    "month",
+    "rainfall_risk",
+    "temp_anomaly",
+    "flood_risk_score"
+  ],
+  "target_col": "banjir"
+}

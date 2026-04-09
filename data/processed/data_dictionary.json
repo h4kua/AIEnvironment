@@ -1,0 +1,180 @@
+{
+  "total_rows": 2928,
+  "total_columns": 24,
+  "columns": {
+    "name_2": {
+      "type": "categorical",
+      "unique_values": 5,
+      "missing": 0
+    },
+    "name_3": {
+      "type": "categorical",
+      "unique_values": 42,
+      "missing": 0
+    },
+    "avg_rainfall": {
+      "type": "numeric",
+      "min": 0.94,
+      "max": 87.044,
+      "mean": 28.411922131147538,
+      "std": 19.12159581393657,
+      "missing": 0
+    },
+    "max_rainfall": {
+      "type": "numeric",
+      "min": 1.195,
+      "max": 165.817,
+      "mean": 56.05592588797814,
+      "std": 33.11063373910304,
+      "missing": 0
+    },
+    "avg_temperature": {
+      "type": "numeric",
+      "min": 27.23,
+      "max": 43.74,
+      "mean": 37.890761612021855,
+      "std": 2.1849749217820005,
+      "missing": 0
+    },
+    "elevation": {
+      "type": "numeric",
+      "min": 3.083,
+      "max": 57.304,
+      "mean": 17.025188524590163,
+      "std": 14.504489520303588,
+      "missing": 0
+    },
+    "landcover_class": {
+      "type": "categorical",
+      "unique_values": 2,
+      "missing": 0
+    },
+    "ndvi": {
+      "type": "numeric",
+      "min": 0.082,
+      "max": 0.515,
+      "mean": 0.2568500683060109,
+      "std": 0.0812403655006002,
+      "missing": 0
+    },
+    "slope": {
+      "type": "numeric",
+      "min": 0.048,
+      "max": 0.27,
+      "mean": 0.12843545081967214,
+      "std": 0.05965948758210995,
+      "missing": 0
+    },
+    "soil_moisture": {
+      "type": "numeric",
+      "min": 28.16,
+      "max": 41.652,
+      "mean": 37.53853210382513,
+      "std": 2.0928039934905227,
+      "missing": 0
+    },
+    "year": {
+      "type": "numeric",
+      "min": 2020.0,
+      "max": 2024.0,
+      "mean": 2021.9924863387978,
+      "std": 1.4168485288934938,
+      "missing": 0
+    },
+    "month": {
+      "type": "numeric",
+      "min": 1.0,
+      "max": 12.0,
+      "mean": 6.467896174863388,
+      "std": 3.462571715307542,
+      "missing": 0
+    },
+    "banjir": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.09631147540983606,
+      "std": 0.29506831502972514,
+      "missing": 0
+    },
+    "lat": {
+      "type": "numeric",
+      "min": -6.4297,
+      "max": -6.115,
+      "mean": -6.208334938524589,
+      "std": 0.06223043238911452,
+      "missing": 0
+    },
+    "long": {
+      "type": "numeric",
+      "min": 106.7039,
+      "max": 106.9421,
+      "mean": 106.83586089480875,
+      "std": 0.054626212443375656,
+      "missing": 0
+    },
+    "map_image": {
+      "type": "categorical",
+      "unique_values": 160,
+      "missing": 408
+    },
+    "name_3_clean": {
+      "type": "categorical",
+      "unique_values": 42,
+      "missing": 408
+    },
+    "jakarta_region": {
+      "type": "categorical",
+      "unique_values": 5,
+      "missing": 0
+    },
+    "rainfall_soil_interaction": {
+      "type": "numeric",
+      "min": 36.08422,
+      "max": 6435.3577700000005,
+      "mean": 2145.1530533732926,
+      "std": 1316.7931354455584,
+      "missing": 0
+    },
+    "elevation_risk": {
+      "type": "numeric",
+      "min": 0.017151481888035124,
+      "max": 0.24491795248591722,
+      "mean": 0.09556617042311617,
+      "std": 0.0643230789299371,
+      "missing": 0
+    },
+    "vegetation_elevation_risk": {
+      "type": "numeric",
+      "min": 0.009381860592755212,
+      "max": 0.2135684545677198,
+      "mean": 0.07342274948001401,
+      "std": 0.05125208875456187,
+      "missing": 0
+    },
+    "extreme_weather": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.10006830601092896,
+      "std": 0.30014231127419083,
+      "missing": 0
+    },
+    "monsoon_season": {
+      "type": "numeric",
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.4187158469945355,
+      "std": 0.49343291424034774,
+      "missing": 0
+    },
+    "urban_density_risk": {
+      "type": "numeric",
+      "min": 1.3585434173669468,
+      "max": 6.141891891891891,
+      "mean": 3.5131820116446364,
+      "std": 1.0758691239099458,
+      "missing": 0
+    }
+  }
+}

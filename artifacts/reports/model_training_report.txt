@@ -1,0 +1,73 @@
+
+======================================================================
+FLOOD PREDICTION MODEL - TRAINING REPORT
+======================================================================
+
+📋 MODEL INFORMATION
+   Model Name: Flood Prediction XGBoost Classifier
+   Model Type: XGBoost + CalibratedClassifierCV
+   Task: Binary Classification - Flood/No Flood
+   Created: 2026-04-09 09:26:07
+
+📊 DATA SUMMARY
+   Raw Data Files: 2
+   Initial Records: 21047
+   Final Records: 21047
+   Duplicates Removed: 0
+   Total Features: 11
+   Engineered Features: 4
+
+🗺️  JAKARTA REGION COVERAGE
+   Regions Found: 0/5
+   Status: ⚠️ PARTIAL
+
+   Region Distribution:
+      Jakarta Barat: 561 (2.67%)
+      Jakarta Timur: 700 (3.33%)
+      Jakarta Selatan: 697 (3.31%)
+      Jakarta Utara: 425 (2.02%)
+      Jakarta Pusat: 545 (2.59%)
+
+🎯 MODEL PERFORMANCE - TEST SET
+   Accuracy:  0.9639
+   Precision: 0.9649
+   Recall:    0.9639
+   F1-Score:  0.9638
+   ROC-AUC:   0.9918
+
+📈 MODEL PERFORMANCE - TRAINING SET
+   Accuracy:  0.9873
+   Precision: 0.9875
+   Recall:    0.9873
+   F1-Score:  0.9873
+   ROC-AUC:   0.9995
+
+🔍 OVERFITTING ANALYSIS
+   Accuracy Gap (Train - Test): 0.0235
+   Status: ✓ GOOD GENERALIZATION
+
+🏆 TOP 5 FEATURES
+   long                          : 0.5542
+   lat                           : 0.1752
+   month                         : 0.0617
+   year                          : 0.0386
+   avg_temperature               : 0.0311
+
+⚙️  HYPERPARAMETERS
+   colsample_bytree         : 0.8
+   learning_rate            : 0.1
+   max_depth                : 6
+   n_estimators             : 200
+   subsample                : 0.8
+
+📁 SAVED ARTIFACTS
+   - flood_model.pkl (Calibrated model)
+   - scaler.pkl (StandardScaler)
+   - feature_list.json (Feature information)
+   - best_hyperparameters.json (Tuned hyperparameters)
+   - model_card.json (Comprehensive model metadata)
+   - reproducibility.json (Full reproducibility info)
+   - model_training_report.txt (This file)
+
+✅ STATUS: READY FOR DEPLOYMENT
+======================================================================

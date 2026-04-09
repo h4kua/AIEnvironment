@@ -1,0 +1,19 @@
+[
+  "avg_rainfall",
+  "max_rainfall",
+  "avg_temperature",
+  "elevation",
+  "ndvi",
+  "slope",
+  "soil_moisture",
+  "year",
+  "month",
+  "lat",
+  "long",
+  "rainfall_soil_interaction",
+  "elevation_risk",
+  "vegetation_elevation_risk",
+  "extreme_weather",
+  "monsoon_season",
+  "urban_density_risk"
+]

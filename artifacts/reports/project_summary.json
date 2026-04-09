@@ -1,0 +1,58 @@
+{
+  "project": {
+    "name": "Jakarta Flood Prediction System",
+    "version": "1.0",
+    "competition": "AI for Environmental & Social Impact",
+    "status": "Production Ready"
+  },
+  "data": {
+    "raw_records": 21047,
+    "jakarta_records": 2928,
+    "processed_records": 2928,
+    "features": 17,
+    "engineered_features": 6
+  },
+  "model": {
+    "type": "XGBoost Classifier (Calibrated)",
+    "hyperparameters": {
+      "colsample_bytree": 0.7,
+      "learning_rate": 0.15,
+      "max_depth": 7,
+      "n_estimators": 150,
+      "subsample": 0.7
+    },
+    "random_state": 42
+  },
+  "performance": {
+    "test_accuracy": 0.9436860068259386,
+    "test_precision": 0.9441433444835208,
+    "test_recall": 0.9436860068259386,
+    "test_f1_score": 0.9439085954992682,
+    "test_roc_auc": 0.9452493261455525,
+    "train_test_accuracy_gap": 0.055887007691567736
+  },
+  "threshold_optimization": {
+    "optimal_threshold": 0.3599999999999999,
+    "optimal_f1_score": 0.7130434782608696,
+    "thresholds_evaluated": 81
+  },
+  "risk_classification": {
+    "safe_count": 526,
+    "warning_count": 7,
+    "danger_count": 53
+  },
+  "artifacts": {
+    "models": 3,
+    "visualizations": 6,
+    "data_files": 3,
+    "total": 12
+  },
+  "real_time_prediction": {
+    "risk_level": "SAFE",
+    "probability": 0.0068737514401001985,
+    "confidence": 0.9931262485598998,
+    "timestamp": "2026-04-09T10:41:02.374733"
+  },
+  "deployment_ready": true,
+  "generated_at": "2026-04-09T10:41:14.269614"
+}

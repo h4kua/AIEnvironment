@@ -1,0 +1,13 @@
+{
+  "optimal_threshold_f1": 0.3599999999999999,
+  "optimal_f1_score": 0.7130434782608696,
+  "optimal_precision": 0.6949152542372882,
+  "optimal_recall": 0.7321428571428571,
+  "risk_classification": {
+    "SAFE": 0.17999999999999994,
+    "WARNING": 0.3599999999999999,
+    "DANGER": 0.3599999999999999
+  },
+  "thresholds_tested": 81,
+  "recommended_use": "Use optimal_threshold_f1 for balanced performance. Use lower threshold for maximum early warning sensitivity."
+}

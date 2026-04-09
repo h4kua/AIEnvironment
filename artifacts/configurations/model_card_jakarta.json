@@ -1,0 +1,36 @@
+{
+  "model_name": "XGBoost Flood Predictor - Jakarta",
+  "purpose": "Flood prediction for Jakarta metropolitan area",
+  "regions": [
+    "Jakarta Barat",
+    "Jakarta Timur",
+    "Jakarta Selatan",
+    "Jakarta Utara",
+    "Jakarta Pusat"
+  ],
+  "training_date": "2026-04-09T10:40:59.775415",
+  "dataset_size": 4232,
+  "test_set_size": 586,
+  "features_count": 17,
+  "engineered_features": [
+    "rainfall_soil_interaction",
+    "elevation_risk",
+    "vegetation_elevation_risk",
+    "extreme_weather",
+    "monsoon_season",
+    "urban_density_risk"
+  ],
+  "performance": {
+    "test_accuracy": 0.9436860068259386,
+    "test_f1": 0.9439085954992682,
+    "test_roc_auc": 0.9452493261455525
+  },
+  "hyperparameters": {
+    "colsample_bytree": 0.7,
+    "learning_rate": 0.15,
+    "max_depth": 7,
+    "n_estimators": 150,
+    "subsample": 0.7
+  },
+  "random_state": 42
+}

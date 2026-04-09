@@ -1,0 +1,81 @@
+{
+  "model_name": "Flood Prediction XGBoost Classifier",
+  "model_type": "XGBoost + CalibratedClassifierCV",
+  "task": "Binary Classification",
+  "target": "banjir",
+  "n_features": 11,
+  "features": [
+    "avg_rainfall",
+    "max_rainfall",
+    "avg_temperature",
+    "elevation",
+    "ndvi",
+    "slope",
+    "soil_moisture",
+    "year",
+    "month",
+    "lat",
+    "long"
+  ],
+  "engineered_features": [
+    "rainfall_soil_interaction",
+    "elevation_risk",
+    "vegetation_elevation_risk",
+    "extreme_weather"
+  ],
+  "training_data_info": {
+    "total_samples": 21047,
+    "train_samples": 16837,
+    "test_samples": 4210,
+    "class_distribution": {
+      "0": 11635,
+      "1": 9412
+    }
+  },
+  "model_performance": {
+    "test_accuracy": 0.963895486935867,
+    "test_precision": 0.9649471074129227,
+    "test_recall": 0.963895486935867,
+    "test_f1_score": 0.9637719231423331,
+    "test_roc_auc": 0.9917585270329761,
+    "train_accuracy": 0.9873492902536081,
+    "overfitting_gap": 0.02345380331774105
+  },
+  "hyperparameters": {
+    "colsample_bytree": "0.8",
+    "learning_rate": "0.1",
+    "max_depth": "6",
+    "n_estimators": "200",
+    "subsample": "0.8",
+    "grid_search_score": 0.965175279810932
+  },
+  "top_5_features": [
+    {
+      "feature": "long",
+      "importance": 0.5542201399803162
+    },
+    {
+      "feature": "lat",
+      "importance": 0.17521017789840698
+    },
+    {
+      "feature": "month",
+      "importance": 0.061688005924224854
+    },
+    {
+      "feature": "year",
+      "importance": 0.03862560912966728
+    },
+    {
+      "feature": "avg_temperature",
+      "importance": 0.031137974932789803
+    }
+  ],
+  "created_at": "2026-04-09T09:26:07.121562",
+  "framework_versions": {
+    "pandas": "3.0.2",
+    "numpy": "2.4.4",
+    "scikit-learn": "1.0+",
+    "xgboost": "3.2.0"
+  }
+}
