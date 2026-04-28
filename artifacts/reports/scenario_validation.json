@@ -1,0 +1,2220 @@
+{
+  "generated_at": "2026-04-24T10:40:42.866008+00:00",
+  "scenarios": [
+    {
+      "scenario_name": "extreme_rainfall",
+      "input_summary": "Extreme rainfall 92 mm/h, BMKG Extreme alert confirmed (Observed/Immediate), water level rising to 680 cm",
+      "expected_behavior": "risk_level WARNING or DANGER \u2014 extreme_rainfall or bmkg_confirmed_alert driver active",
+      "scenario_metadata": {
+        "real_world_reference": "Jakarta flood event, 1\u20132 January 2020. Kemayoran recorded 377 mm/24h (peak intensity ~95 mm/h). BMKG issued Extreme alert. Manggarai water gate reached 950 cm (Siaga 1). 173 kelurahan inundated across 5 municipalities.",
+        "expected_behavior": "System should classify DANGER or WARNING; dominant_risk_driver should be extreme_rainfall or compound_risk; all three hazard signals (rainfall, hydrology, BMKG) should fire simultaneously. No signal conflict expected.",
+        "hydrology_context": "Ciliwung upstream surge amplified by saturated catchment (wet season Jan).",
+        "monsoon_phase": "peak_wet_season"
+      },
+      "plausibility": {
+        "plausibility_score": 1.0,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {
+          "temp_c": 1.0,
+          "humidity_pct": 1.0,
+          "rainfall_1h_mm": 1.0,
+          "rainfall_3h_mm": 1.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 1.0
+        },
+        "combo_flags": []
+      },
+      "output": {
+        "system_status": "CONFLICT",
+        "requires_manual_review": true,
+        "risk_level": "DANGER",
+        "probability": 0.0863,
+        "confidence_score": 0.1515,
+        "decision_summary": "Multiple independent hazard signals converge on flood danger (20% confidence) \u2014 immediate protective action required.",
+        "final_reason": "Model confidence reduced by calibration penalty (ECE=0.378) \u2014 final DANGER assessment reflects adjusted, more conservative confidence.",
+        "dominant_risk_driver": "compound_event",
+        "risk_interpretation": "Compound event detected: concurrent extreme rainfall, elevated water level, and official BMKG alerts are mutually reinforcing. Multi-hazard overlap elevates actual flood risk well beyond any single indicator threshold. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution.",
+        "recommended_action": [
+          "IMMEDIATE: Issue multi-agency emergency coordination alert \u2014 compound flood event conditions are active.",
+          "IMMEDIATE: Restrict access to historically flooded corridors pending field assessment.",
+          "HIGH PRIORITY: Cross-reference BMKG alert details with water-gate operations. Confirm gate opening status and spillway capacity.",
+          "Increase water-level monitoring to 15-minute intervals \u2014 current rise rate \u03940.53/step requires close tracking.",
+          "Inspect and clear urban drainage inlets in flood-prone districts. High-intensity rainfall may overwhelm standard drainage capacity.",
+          "Alert downstream basin coordinators \u2014 sustained rainfall accumulation will likely propagate as a downstream surge within 1\u20133 hours.",
+          "High atmospheric humidity indicates additional rainfall likely even if current BMKG alert intensity appears moderate. Maintain elevated operational readiness.",
+          "Deploy field verification teams to the top 3 flood-prone areas for ground-truth validation of sensor readings.",
+          "Hydrological-meteorological index elevated \u2014 coordinate with BPBD for pre-emptive resource staging at high-risk districts.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "signal_override",
+        "decision_trace": [
+          "[L1.5-SIGNAL] Extreme rainfall + BMKG confirmed + compound risk active simultaneously (plausibility=1.00) \u2014 overrides ML output (WARNING)",
+          "[L1.5-SIGNAL] \u2192 Risk escalated to DANGER (multi-signal extreme event, physical station data unavailable)",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0504 (\u00d70.800)",
+          "[FINAL] risk=DANGER, confidence=0.2015, source=signal_override"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal"
+          ],
+          "classification_basis": "prob 0.0863 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0504,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.2015
+        },
+        "override_trace": {
+          "triggered": false,
+          "reason": "",
+          "confidence": "n/a",
+          "hydrology_severity": 0.25,
+          "dominant_station": "Manggarai",
+          "dominant_siaga": "siaga4"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.2015,
+          "model_only_score": 0.5219,
+          "baseline_only_score": 0.4659,
+          "agentic_improvement_over_model": -0.3204,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "WATCH: Manggarai at Siaga 4 \u2014 early warning. 1 station(s) approaching next alert level. Alert: Manggarai approaching next alert threshold \u2014 escalation possible within the current prediction window.",
+        "hydrology_assessment": {
+          "severity_score": 0.25,
+          "dominant_station": "Manggarai",
+          "dominant_siaga_level": "siaga4",
+          "critical_station_count": 0,
+          "near_threshold_count": 1,
+          "rapid_escalation": false,
+          "overall_explanation": "WATCH: Manggarai at Siaga 4 \u2014 early warning. 1 station(s) approaching next alert level.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 680.0,
+              "siaga_level": "siaga4",
+              "severity_score": 0.25,
+              "water_level_ratio": 0.7158,
+              "near_threshold": true,
+              "near_threshold_margin_cm": 70.0,
+              "next_siaga_level": "siaga3",
+              "explanation": "Manggarai: 680 cm \u2014 Siaga4 (elevated). 70 cm below siaga3."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "signal_conflict",
+            "severity": "high",
+            "message": "Model probability (0.09) is lower than the rule-based baseline (0.62) by 0.53. Manual review required before operational action.",
+            "detail": {
+              "model_prob": 0.0863,
+              "baseline_prob": 0.6204,
+              "gap": 0.5341
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.064). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.0643,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.6204,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.8079,
+            "components": {
+              "intensity_1h": 0.75,
+              "accumulation_3h": 0.7,
+              "sustained_rolling": 0.6
+            },
+            "alert": true
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.467,
+            "components": {
+              "water_level_ratio": 0.5741,
+              "water_level_delta": 0.4,
+              "bmkg_support": 0.3,
+              "hmi_component": 0.35
+            },
+            "alert": false
+          },
+          "baseline_disagreement": 0.5341,
+          "baseline_alert": true,
+          "model_vs_baseline": "model_lower"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": true,
+          "high_rainfall": true,
+          "sustained_rainfall": true,
+          "critical_water_level": false,
+          "high_water_level": true,
+          "rising_water": true,
+          "rapid_rise": true,
+          "hydro_stress": true,
+          "bmkg_extreme": true,
+          "bmkg_moderate": true,
+          "bmkg_confirmed": true,
+          "compound_risk": true,
+          "atmosphere_saturated": true,
+          "monsoon_context": false,
+          "hmi_high": true,
+          "dominant_driver": "compound_event"
+        },
+        "diagnostics": {
+          "history_rows_used": 107,
+          "temporal_features_ready": true,
+          "bmkg_source": "observed_alerts",
+          "water_level_records": 1
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.3419,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.533,
+          "composite_trust": 0.6105,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "Signal conflict detected: internal ML model and rule-based physical baseline produce contradictory risk assessments. Current determination is DANGER, but opposing signals are present. Cross-reference with direct sensor readings before acting.",
+        "timestamp_utc": "2026-04-24T10:40:37.666972+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": "11 active flood zone(s): 11 high-severity, 0 medium-severity. Supply 'origin' and 'destination' for a concrete flood-safe route recommendation.",
+          "reason": "Risk level DANGER detected \u2014 flood-zone avoidance is active. Provide 'origin' and 'destination' query parameters for a routed recommendation.",
+          "flood_zones_checked": 11,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:38.409157+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 1655.8
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "extreme_rainfall",
+        "predicted_risk": "DANGER",
+        "expected_risk": "DANGER",
+        "predicted_status": "CONFLICT",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.1515,
+        "correctness_score": 1.0,
+        "robustness_score": 0.1515,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "hydrology_spike",
+      "input_summary": "Near-zero rainfall (1.5 mm/h) but two water gates at critical/danger level (920 cm, 870 cm)",
+      "expected_behavior": "risk_level WARNING or DANGER \u2014 critical_hydrology or rapid_rise signal; possible signal_conflict (no rain but high water)",
+      "scenario_metadata": {
+        "real_world_reference": "Katulampa upstream surge events, e.g. March 2016. Heavy rain in Bogor highlands (outside Jakarta sensor network) caused Katulampa to reach Siaga 1 (800+ cm) while Jakarta rainfall remained low. Classic upstream-driven flood with no local rain signal.",
+        "expected_behavior": "System should classify WARNING or DANGER via critical_hydrology signal. signal_conflict failure expected (water rising without local rain). System status should be DEGRADED or CONFLICT.",
+        "hydrology_context": "Upstream Bogor catchment saturated; tidal contribution may amplify.",
+        "monsoon_phase": "transition_or_wet"
+      },
+      "plausibility": {
+        "plausibility_score": 1.0,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {
+          "temp_c": 1.0,
+          "humidity_pct": 1.0,
+          "rainfall_1h_mm": 1.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 1.0
+        },
+        "combo_flags": []
+      },
+      "output": {
+        "system_status": "CONFLICT",
+        "requires_manual_review": true,
+        "risk_level": "DANGER",
+        "probability": 0.0404,
+        "confidence_score": 0.2294,
+        "decision_summary": "Physical flood conditions at Katulampa (SIAGA1) override the ML model \u2014 immediate protective action is required regardless of computational confidence.",
+        "final_reason": "Physical water-level measurements at Katulampa (SIAGA1) (severity 1.00) override the ML model and mandate DANGER classification.",
+        "dominant_risk_driver": "hydrology_unverified",
+        "risk_interpretation": "Water level critically elevated (ratio 1.09), approaching or exceeding the operational overflow threshold. Even moderate additional rainfall may trigger inundation \u2014 hydrological buffer is nearly exhausted. Caveat: one or more input data sources are missing \u2014 this interpretation reflects partial observability. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution. [RELIABILITY NOTE: Hydrology assessment reduced \u2014 TMA water-level data unavailable. River-level signals cannot be independently verified.]",
+        "recommended_action": [
+          "IMMEDIATE: Activate evacuation protocols for flood-prone zones near water-monitoring stations exceeding threshold ratio.",
+          "IMMEDIATE: Notify emergency response teams for standby deployment.",
+          "Increase water-level monitoring to 15-minute intervals \u2014 current rise rate \u03940.37/step requires close tracking.",
+          "Inspect and clear urban drainage inlets in flood-prone districts. High-intensity rainfall may overwhelm standard drainage capacity.",
+          "Deploy field verification teams to the top 3 flood-prone areas for ground-truth validation of sensor readings.",
+          "Hydrological-meteorological index elevated \u2014 coordinate with BPBD for pre-emptive resource staging at high-risk districts.",
+          "DATA: Restore missing sensor feeds immediately. Current assessment operates under reduced observability.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "physical_override",
+        "decision_trace": [
+          "[L1-PHYSICAL] Katulampa SIAGA1 (severity=1.00) overrides ML output (WARNING)",
+          "[L1-PHYSICAL] \u2192 Risk escalated to DANGER (physical confidence: high)",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0699 (\u00d70.800)",
+          "[FINAL] risk=DANGER, confidence=0.2794, source=physical_override"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal",
+            "Missing data \u2014 cannot independently verify extreme conditions"
+          ],
+          "classification_basis": "prob 0.0404 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0699,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.2794
+        },
+        "override_trace": {
+          "triggered": true,
+          "reason": "Katulampa at SIAGA1 (severity=1.00) \u2014 critical water level confirmed by BPBD operational thresholds",
+          "confidence": "high",
+          "hydrology_severity": 1.0,
+          "dominant_station": "Katulampa",
+          "dominant_siaga": "siaga1"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.2794,
+          "model_only_score": 0.6443,
+          "baseline_only_score": 0.6594,
+          "agentic_improvement_over_model": -0.3649,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "CRITICAL: Katulampa at Siaga 1 (870 cm). Immediate flood risk \u2014 highest alert. 2 stations at critical levels \u2014 compound hydrology risk. 1 station(s) approaching next alert level. Alert: Manggarai approaching next alert threshold \u2014 escalation possible within the current prediction window.",
+        "hydrology_assessment": {
+          "severity_score": 1.0,
+          "dominant_station": "Katulampa",
+          "dominant_siaga_level": "siaga1",
+          "critical_station_count": 2,
+          "near_threshold_count": 1,
+          "rapid_escalation": false,
+          "overall_explanation": "CRITICAL: Katulampa at Siaga 1 (870 cm). Immediate flood risk \u2014 highest alert. 2 stations at critical levels \u2014 compound hydrology risk. 1 station(s) approaching next alert level.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 920.0,
+              "siaga_level": "siaga2",
+              "severity_score": 0.75,
+              "water_level_ratio": 0.9684,
+              "near_threshold": true,
+              "near_threshold_margin_cm": 30.0,
+              "next_siaga_level": "siaga1",
+              "explanation": "Manggarai: 920 cm \u2014 Siaga 2 (severe). Approaching Siaga 1 \u2014 imminent escalation."
+            },
+            {
+              "station_id": "katulampa",
+              "station_name": "Katulampa",
+              "tinggi_air_cm": 870.0,
+              "siaga_level": "siaga1",
+              "severity_score": 1.0,
+              "water_level_ratio": 1.0875,
+              "near_threshold": false,
+              "near_threshold_margin_cm": 0.0,
+              "next_siaga_level": "",
+              "explanation": "Katulampa: 870 cm \u2014 AT SIAGA 1 (critical). Flood conditions active at highest alert threshold."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "missing_data",
+            "severity": "low",
+            "message": "Section 'bmkg_alerts' is empty \u2014 BMKG meteorological alerts unavailable.",
+            "detail": {
+              "section": "bmkg_alerts",
+              "count": 0
+            }
+          },
+          {
+            "type": "signal_conflict",
+            "severity": "medium",
+            "message": "Model probability (0.04) is lower than the rule-based baseline (0.38) by 0.34. Manual review required before operational action.",
+            "detail": {
+              "model_prob": 0.0404,
+              "baseline_prob": 0.381,
+              "gap": 0.3406
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.043). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.0428,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.381,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.128,
+            "components": {
+              "intensity_1h": 0.05,
+              "accumulation_3h": 0.05,
+              "sustained_rolling": 0.4399
+            },
+            "alert": false
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.588,
+            "components": {
+              "water_level_ratio": 0.9,
+              "water_level_delta": 0.4,
+              "bmkg_support": 0.02,
+              "hmi_component": 0.35
+            },
+            "alert": true
+          },
+          "baseline_disagreement": 0.3406,
+          "baseline_alert": true,
+          "model_vs_baseline": "model_lower"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": false,
+          "high_rainfall": true,
+          "sustained_rainfall": false,
+          "critical_water_level": true,
+          "high_water_level": true,
+          "rising_water": true,
+          "rapid_rise": true,
+          "hydro_stress": true,
+          "bmkg_extreme": false,
+          "bmkg_moderate": false,
+          "bmkg_confirmed": false,
+          "compound_risk": false,
+          "atmosphere_saturated": false,
+          "monsoon_context": false,
+          "hmi_high": true,
+          "dominant_driver": "critical_hydrology"
+        },
+        "diagnostics": {
+          "history_rows_used": 108,
+          "temporal_features_ready": true,
+          "bmkg_source": "no_alert",
+          "water_level_records": 2
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.4643,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.6297,
+          "composite_trust": 0.6849,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "System operating with reduced hydrology reliability \u2014 TMA (Tinggi Muka Air) real-time data source is unavailable. Hydrology-driven risk signals are present but unverified by live sensor readings. Risk: DANGER (23% confidence).",
+        "timestamp_utc": "2026-04-24T10:40:38.472423+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": "11 active flood zone(s): 7 high-severity, 4 medium-severity. Supply 'origin' and 'destination' for a concrete flood-safe route recommendation.",
+          "reason": "Risk level DANGER detected \u2014 flood-zone avoidance is active. Provide 'origin' and 'destination' query parameters for a routed recommendation.",
+          "flood_zones_checked": 11,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:39.209101+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 800.7
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "hydrology_spike",
+        "predicted_risk": "DANGER",
+        "expected_risk": "DANGER",
+        "predicted_status": "CONFLICT",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.2294,
+        "correctness_score": 1.0,
+        "robustness_score": 0.2294,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "signal_conflict",
+      "input_summary": "BMKG Extreme alert active (high weighted score) but observed rainfall near zero and water level normal",
+      "expected_behavior": "failure_modes contains signal_conflict \u2014 BMKG alert without matching observed rainfall",
+      "scenario_metadata": {
+        "real_world_reference": "BMKG forecast-only alerts issued ahead of Madden-Julian Oscillation (MJO) passage, e.g. November pre-monsoon 2019. BMKG issued Extreme certainty alerts based on NWP model output while observed rainfall at Kemayoran/Halim remained near-zero for 6+ hours. Classic forecast-vs-observation mismatch.",
+        "expected_behavior": "signal_conflict failure must be detected (BMKG active but near-zero observed rainfall). system_status should be CONFLICT or DEGRADED. Risk should be WARNING, not SAFE (BMKG signal carries residual weight even without confirmation).",
+        "hydrology_context": "Forecast-only period; no upstream surge yet; drainage not stressed.",
+        "monsoon_phase": "pre_monsoon_onset"
+      },
+      "plausibility": {
+        "plausibility_score": 1.0,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {
+          "temp_c": 1.0,
+          "humidity_pct": 1.0,
+          "rainfall_1h_mm": 1.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 1.0
+        },
+        "combo_flags": []
+      },
+      "output": {
+        "system_status": "DEGRADED",
+        "requires_manual_review": true,
+        "risk_level": "WARNING",
+        "probability": 0.04,
+        "confidence_score": 0.2706,
+        "decision_summary": "Elevated flood risk conditions detected (32% confidence) \u2014 increase monitoring cadence and activate contingency preparations.",
+        "final_reason": "Model confidence reduced by calibration penalty (ECE=0.378) \u2014 final WARNING assessment reflects adjusted, more conservative confidence.",
+        "dominant_risk_driver": "bmkg_confirmed_alert",
+        "risk_interpretation": "BMKG official alert confirmed with high certainty and immediate urgency. This represents an operationally significant warning from the national meteorological agency, indicating observed or imminent severe weather. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution.",
+        "recommended_action": [
+          "HIGH PRIORITY: Cross-reference BMKG alert details with water-gate operations. Confirm gate opening status and spillway capacity.",
+          "Inspect and clear urban drainage inlets in flood-prone districts. High-intensity rainfall may overwhelm standard drainage capacity.",
+          "Deploy field verification teams to the top 3 flood-prone areas for ground-truth validation of sensor readings.",
+          "Hydrological-meteorological index elevated \u2014 coordinate with BPBD for pre-emptive resource staging at high-risk districts.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "signal_override",
+        "decision_trace": [
+          "[L3-ML] probability=0.0400 \u2192 SAFE (system: DEGRADED, confidence: 0.4008)",
+          "[L3-ML] Adaptive threshold raised by +0.100 to 0.550 \u2014 context-adjusted classification",
+          "[L3.5-CONFLICT] signal_conflict + BMKG confirmed/extreme \u2014 competing evidence warrants conservative WARNING (plausibility=1.00)",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0802 (\u00d70.800)",
+          "[FINAL] risk=WARNING, confidence=0.3206, source=signal_override"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal"
+          ],
+          "classification_basis": "prob 0.0400 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0802,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.3206
+        },
+        "override_trace": {
+          "triggered": false,
+          "reason": "",
+          "confidence": "n/a",
+          "hydrology_severity": 0.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga": "normal"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.3206,
+          "model_only_score": 0.6408,
+          "baseline_only_score": 0.9247,
+          "agentic_improvement_over_model": -0.3202,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "All monitored stations within normal range.",
+        "hydrology_assessment": {
+          "severity_score": 0.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga_level": "normal",
+          "critical_station_count": 0,
+          "near_threshold_count": 0,
+          "rapid_escalation": false,
+          "overall_explanation": "All monitored stations within normal range.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 290.0,
+              "siaga_level": "normal",
+              "severity_score": 0.0,
+              "water_level_ratio": 0.3053,
+              "near_threshold": false,
+              "near_threshold_margin_cm": 0.0,
+              "next_siaga_level": "",
+              "explanation": "Manggarai: 290 cm \u2014 Normal range."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "signal_conflict",
+            "severity": "medium",
+            "message": "BMKG weighted score 1.00 indicates an active alert, but observed rainfall is 0.2 mm/h (near zero). Possible: forecast-only alert, localized cell, or missing rain-gauge data.",
+            "detail": {
+              "bmkg_weighted": 1.0,
+              "rainfall_mm": 0.2
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.051). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.0505,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.1153,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.1279,
+            "components": {
+              "intensity_1h": 0.05,
+              "accumulation_3h": 0.05,
+              "sustained_rolling": 0.4393
+            },
+            "alert": false
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.105,
+            "components": {
+              "water_level_ratio": 0.05,
+              "water_level_delta": 0.0,
+              "bmkg_support": 0.3,
+              "hmi_component": 0.35
+            },
+            "alert": false
+          },
+          "baseline_disagreement": 0.0753,
+          "baseline_alert": false,
+          "model_vs_baseline": "agree"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": false,
+          "high_rainfall": true,
+          "sustained_rainfall": false,
+          "critical_water_level": false,
+          "high_water_level": false,
+          "rising_water": false,
+          "rapid_rise": false,
+          "hydro_stress": false,
+          "bmkg_extreme": true,
+          "bmkg_moderate": true,
+          "bmkg_confirmed": true,
+          "compound_risk": false,
+          "atmosphere_saturated": false,
+          "monsoon_context": false,
+          "hmi_high": true,
+          "dominant_driver": "bmkg_confirmed_alert"
+        },
+        "diagnostics": {
+          "history_rows_used": 109,
+          "temporal_features_ready": true,
+          "bmkg_source": "observed_alerts",
+          "water_level_records": 1
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.4608,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.7624,
+          "composite_trust": 0.7098,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "System operating in DEGRADED mode due to out-of-distribution input features. Risk assessment (WARNING) carries reduced confidence (32%). Maintain elevated operational readiness and validate with field observations.",
+        "timestamp_utc": "2026-04-24T10:40:39.280445+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": "6 active flood zone(s): 0 high-severity, 6 medium-severity. Supply 'origin' and 'destination' for a concrete flood-safe route recommendation.",
+          "reason": "Risk level WARNING detected \u2014 flood-zone avoidance is active. Provide 'origin' and 'destination' query parameters for a routed recommendation.",
+          "flood_zones_checked": 6,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:40.004794+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 795.5
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "signal_conflict",
+        "predicted_risk": "WARNING",
+        "expected_risk": "WARNING",
+        "predicted_status": "DEGRADED",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.2706,
+        "correctness_score": 1.0,
+        "robustness_score": 0.2706,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "missing_data",
+      "input_summary": "Snapshot contains only fetched_at_utc \u2014 all three data sections (openweather, bmkg_alerts, poskobanjir) absent",
+      "expected_behavior": "system_status DEGRADED and/or failure_modes contains missing_data; requires_manual_review likely True",
+      "scenario_metadata": {
+        "real_world_reference": "API connectivity failures during Jakarta flood operations, e.g. 25 February 2020 when BMKG and Posko Banjir APIs experienced simultaneous outages due to server load. Field operators had no automated data for ~2 hours during an active flood event.",
+        "expected_behavior": "System must detect missing_data failures for all three sections. system_status must be DEGRADED; requires_manual_review must be True. Risk classification is unreliable \u2014 system should be conservative.",
+        "hydrology_context": "Unknown \u2014 cannot assess without data.",
+        "monsoon_phase": "unknown"
+      },
+      "plausibility": {
+        "plausibility_score": 0.5,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {},
+        "combo_flags": [],
+        "note": "Insufficient fields to assess plausibility \u2014 defaulting neutral."
+      },
+      "output": {
+        "system_status": "LOW_TRUST",
+        "requires_manual_review": true,
+        "risk_level": "SAFE",
+        "probability": 0.0386,
+        "confidence_score": 0.1059,
+        "decision_summary": "System integrity is low-trust \u2014 risk conservatively classified as SAFE pending independent manual verification.",
+        "final_reason": "System integrity is low-trust \u2014 risk classification is conservative until independent verification is complete.",
+        "dominant_risk_driver": "low_background_risk",
+        "risk_interpretation": "Multi-source signals are within normal operating range. No immediate flood indication from rainfall intensity, official alerts, or current water conditions. Continued routine monitoring is appropriate. Caveat: one or more input data sources are missing \u2014 this interpretation reflects partial observability. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution.",
+        "recommended_action": [
+          "DATA: Restore missing sensor feeds immediately. Current assessment operates under reduced observability."
+        ],
+        "decision_source": "system_guardrail",
+        "decision_trace": [
+          "[L2-GUARDRAIL] LOW_TRUST \u2014 no positive flood signals or low plausibility (0.50), SAFE retained",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0390 (\u00d70.800)",
+          "[FINAL] risk=SAFE, confidence=0.1559, source=system_guardrail"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal",
+            "Missing data \u2014 cannot independently verify extreme conditions"
+          ],
+          "classification_basis": "prob 0.0386 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.039,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.1559
+        },
+        "override_trace": {
+          "triggered": false,
+          "reason": "",
+          "confidence": "n/a",
+          "hydrology_severity": 0.0,
+          "dominant_station": "",
+          "dominant_siaga": "normal"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.1559,
+          "model_only_score": 0.6449,
+          "baseline_only_score": 0.9996,
+          "agentic_improvement_over_model": -0.489,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "No Posko Banjir records \u2014 hydrology cannot be assessed.",
+        "hydrology_assessment": {
+          "severity_score": 0.0,
+          "dominant_station": "",
+          "dominant_siaga_level": "normal",
+          "critical_station_count": 0,
+          "near_threshold_count": 0,
+          "rapid_escalation": false,
+          "overall_explanation": "No Posko Banjir records \u2014 hydrology cannot be assessed.",
+          "stations": []
+        },
+        "failure_modes": [
+          {
+            "type": "missing_data",
+            "severity": "high",
+            "message": "Snapshot missing required section 'openweather' (OpenWeather weather data).",
+            "detail": {
+              "section": "openweather"
+            }
+          },
+          {
+            "type": "missing_data",
+            "severity": "high",
+            "message": "Snapshot missing required section 'poskobanjir' (Posko Banjir water-level records).",
+            "detail": {
+              "section": "poskobanjir"
+            }
+          },
+          {
+            "type": "missing_data",
+            "severity": "high",
+            "message": "Snapshot missing required section 'bmkg_alerts' (BMKG meteorological alerts).",
+            "detail": {
+              "section": "bmkg_alerts"
+            }
+          },
+          {
+            "type": "missing_data",
+            "severity": "medium",
+            "message": "OpenWeather 'main' block missing temperature and humidity \u2014 atmospheric assessment is incomplete.",
+            "detail": {
+              "section": "openweather.main"
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.049). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.0493,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.039,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.05,
+            "components": {
+              "intensity_1h": 0.05,
+              "accumulation_3h": 0.05,
+              "sustained_rolling": 0.05
+            },
+            "alert": false
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.03,
+            "components": {
+              "water_level_ratio": 0.05,
+              "water_level_delta": 0.0,
+              "bmkg_support": 0.02,
+              "hmi_component": 0.02
+            },
+            "alert": false
+          },
+          "baseline_disagreement": 0.0004,
+          "baseline_alert": false,
+          "model_vs_baseline": "agree"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": false,
+          "high_rainfall": false,
+          "sustained_rainfall": false,
+          "critical_water_level": false,
+          "high_water_level": false,
+          "rising_water": false,
+          "rapid_rise": false,
+          "hydro_stress": false,
+          "bmkg_extreme": false,
+          "bmkg_moderate": false,
+          "bmkg_confirmed": false,
+          "compound_risk": false,
+          "atmosphere_saturated": false,
+          "monsoon_context": false,
+          "hmi_high": false,
+          "dominant_driver": "low_background_risk"
+        },
+        "diagnostics": {
+          "history_rows_used": 110,
+          "temporal_features_ready": true,
+          "bmkg_source": "no_alert",
+          "water_level_records": 0
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.4649,
+          "data_quality_factor": 0.0,
+          "signal_agreement_factor": 0.9998,
+          "composite_trust": 0.4092,
+          "is_low_trust": false,
+          "dominant_trust_issue": "data_quality",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "Low-trust assessment: model confidence critically low (16%). Risk estimate is indicative only \u2014 independent manual verification required before any field action.",
+        "timestamp_utc": "2026-04-24T10:40:40.045430+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": null,
+          "reason": "Risk level is SAFE \u2014 route planning not required.",
+          "flood_zones_checked": 0,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:40.621448+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 615.9
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "missing_data",
+        "predicted_risk": "SAFE",
+        "expected_risk": "SAFE",
+        "predicted_status": "LOW_TRUST",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.1059,
+        "correctness_score": 1.0,
+        "robustness_score": 0.1059,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "ood_input",
+      "input_summary": "Physically impossible sensor values: temp=-45\u00b0C, humidity=200%, rain=650 mm/h, tinggi_air=3500 cm",
+      "expected_behavior": "ood_input failure detected or system_status != OK \u2014 IsolationForest should flag extreme outlier",
+      "scenario_metadata": {
+        "real_world_reference": "Sensor instrumentation fault scenario. Jakarta AAWS (Automatic AWS) units have documented fault modes including temperature rollover (-45\u00b0C reading from a stuck sensor), humidity saturation bugs (>100%), and rainfall gauge overflow codes (999 mm/h). These inputs are physically impossible and must be caught before reaching the ML model.",
+        "expected_behavior": "IsolationForest OOD detection must fire. Plausibility score must be near 0.0 (critical violations for temp, humidity, rainfall). System status must be DEGRADED or LOW_TRUST. Model output should not be trusted.",
+        "hydrology_context": "Input is sensor fault \u2014 actual conditions unknown.",
+        "monsoon_phase": "unknown"
+      },
+      "plausibility": {
+        "plausibility_score": 0.2625,
+        "is_plausible": false,
+        "violations": [
+          {
+            "field": "temp_c",
+            "value": -45.0,
+            "normal_range": [
+              20.0,
+              38.0
+            ],
+            "physical_bounds": [
+              -90.0,
+              60.0
+            ],
+            "score": 0.1,
+            "severity": "moderate"
+          },
+          {
+            "field": "humidity_pct",
+            "value": 200.0,
+            "normal_range": [
+              45.0,
+              100.0
+            ],
+            "physical_bounds": [
+              0.0,
+              100.0
+            ],
+            "score": 0.0,
+            "severity": "critical"
+          },
+          {
+            "field": "rainfall_1h_mm",
+            "value": 650.0,
+            "normal_range": [
+              0.0,
+              200.0
+            ],
+            "physical_bounds": [
+              0.0,
+              500.0
+            ],
+            "score": 0.0,
+            "severity": "critical"
+          },
+          {
+            "field": "water_level_cm[manggarai]",
+            "value": 3500.0,
+            "normal_range": [
+              0.0,
+              1200.0
+            ],
+            "physical_bounds": [
+              0.0,
+              2500.0
+            ],
+            "score": 0.0,
+            "severity": "critical"
+          }
+        ],
+        "field_scores": {
+          "temp_c": 0.1,
+          "humidity_pct": 0.0,
+          "rainfall_1h_mm": 0.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 0.0,
+          "combo_sub_zero_jakarta": 0.0,
+          "combo_super_saturated_humidity": 0.0
+        },
+        "combo_flags": [
+          {
+            "combo": "sub_zero_jakarta",
+            "description": "Temperature < 5\u00b0C is physically impossible for equatorial Jakarta (lat -6\u00b0S)",
+            "score": 0.0,
+            "values": {
+              "rainfall_1h_mm": 650.0,
+              "humidity_pct": 200.0,
+              "temp_c": -45.0
+            }
+          },
+          {
+            "combo": "super_saturated_humidity",
+            "description": "Humidity > 100% violates thermodynamic law \u2014 sensor fault or synthetic data",
+            "score": 0.0,
+            "values": {
+              "rainfall_1h_mm": 650.0,
+              "humidity_pct": 200.0,
+              "temp_c": -45.0
+            }
+          }
+        ]
+      },
+      "output": {
+        "system_status": "CONFLICT",
+        "requires_manual_review": true,
+        "risk_level": "SAFE",
+        "probability": 0.0463,
+        "confidence_score": 0.1775,
+        "decision_summary": "System integrity is conflict \u2014 risk conservatively classified as SAFE pending independent manual verification.",
+        "final_reason": "System integrity is conflict \u2014 risk classification is conservative until independent verification is complete.",
+        "dominant_risk_driver": "hydrology_unverified",
+        "risk_interpretation": "Water level critically elevated (ratio 1.50), approaching or exceeding the operational overflow threshold. Even moderate additional rainfall may trigger inundation \u2014 hydrological buffer is nearly exhausted. Caveat: one or more input data sources are missing \u2014 this interpretation reflects partial observability. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution. [RELIABILITY NOTE: Hydrology assessment reduced \u2014 TMA water-level data unavailable. River-level signals cannot be independently verified.]",
+        "recommended_action": [
+          "IMMEDIATE: Activate evacuation protocols for flood-prone zones near water-monitoring stations exceeding threshold ratio.",
+          "IMMEDIATE: Notify emergency response teams for standby deployment.",
+          "DATA: Restore missing sensor feeds immediately. Current assessment operates under reduced observability.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "system_guardrail",
+        "decision_trace": [
+          "[L2-GUARDRAIL] CONFLICT \u2014 ML result (WARNING) retained with reduced confidence; manual verification required",
+          "[PLAUSIBILITY-GATE] plausibility=0.26 < 0.3 \u2014 ML escalation suppressed, SAFE retained (OOD inputs cannot drive confident flood prediction)",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0569 (\u00d70.800)",
+          "[FINAL] risk=SAFE, confidence=0.2275, source=system_guardrail"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal",
+            "Missing data \u2014 cannot independently verify extreme conditions"
+          ],
+          "classification_basis": "prob 0.0463 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0569,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.2275
+        },
+        "override_trace": {
+          "triggered": false,
+          "reason": "",
+          "confidence": "n/a",
+          "hydrology_severity": 1.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga": "siaga1"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.2275,
+          "model_only_score": 0.5794,
+          "baseline_only_score": 0.3593,
+          "agentic_improvement_over_model": -0.3519,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "CRITICAL: Manggarai at Siaga 1 (3500 cm). Immediate flood risk \u2014 highest alert.",
+        "hydrology_assessment": {
+          "severity_score": 1.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga_level": "siaga1",
+          "critical_station_count": 1,
+          "near_threshold_count": 0,
+          "rapid_escalation": false,
+          "overall_explanation": "CRITICAL: Manggarai at Siaga 1 (3500 cm). Immediate flood risk \u2014 highest alert.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 3500.0,
+              "siaga_level": "siaga1",
+              "severity_score": 1.0,
+              "water_level_ratio": 1.5,
+              "near_threshold": false,
+              "near_threshold_margin_cm": 0.0,
+              "next_siaga_level": "",
+              "explanation": "Manggarai: 3500 cm \u2014 AT SIAGA 1 (critical). Flood conditions active at highest alert threshold."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "missing_data",
+            "severity": "low",
+            "message": "Section 'bmkg_alerts' is empty \u2014 BMKG meteorological alerts unavailable.",
+            "detail": {
+              "section": "bmkg_alerts",
+              "count": 0
+            }
+          },
+          {
+            "type": "signal_conflict",
+            "severity": "high",
+            "message": "Model probability (0.05) is lower than the rule-based baseline (0.69) by 0.64. Manual review required before operational action.",
+            "detail": {
+              "model_prob": 0.0463,
+              "baseline_prob": 0.687,
+              "gap": 0.6407
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.132). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.1316,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.687,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.8079,
+            "components": {
+              "intensity_1h": 0.75,
+              "accumulation_3h": 0.7,
+              "sustained_rolling": 0.6
+            },
+            "alert": true
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.588,
+            "components": {
+              "water_level_ratio": 0.9,
+              "water_level_delta": 0.4,
+              "bmkg_support": 0.02,
+              "hmi_component": 0.35
+            },
+            "alert": true
+          },
+          "baseline_disagreement": 0.6407,
+          "baseline_alert": true,
+          "model_vs_baseline": "model_lower"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": false,
+          "high_rainfall": false,
+          "sustained_rainfall": false,
+          "critical_water_level": false,
+          "high_water_level": false,
+          "rising_water": false,
+          "rapid_rise": false,
+          "hydro_stress": false,
+          "bmkg_extreme": false,
+          "bmkg_moderate": false,
+          "bmkg_confirmed": false,
+          "compound_risk": false,
+          "atmosphere_saturated": false,
+          "monsoon_context": false,
+          "hmi_high": false,
+          "dominant_driver": "critical_hydrology"
+        },
+        "diagnostics": {
+          "history_rows_used": 111,
+          "temporal_features_ready": true,
+          "bmkg_source": "no_alert",
+          "water_level_records": 1
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.3994,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.5,
+          "composite_trust": 0.6297,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "System operating with reduced hydrology reliability \u2014 TMA (Tinggi Muka Air) real-time data source is unavailable. Hydrology-driven risk signals are present but unverified by live sensor readings. Risk: SAFE (18% confidence).",
+        "timestamp_utc": "2026-04-24T10:40:40.664921+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": null,
+          "reason": "Risk level is SAFE \u2014 route planning not required.",
+          "flood_zones_checked": 0,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:41.281253+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 660.1
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "ood_input",
+        "predicted_risk": "SAFE",
+        "expected_risk": "SAFE",
+        "predicted_status": "CONFLICT",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.1775,
+        "correctness_score": 1.0,
+        "robustness_score": 0.1775,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "compound_risk",
+      "input_summary": "Full compound event: extreme rain (65 mm/h) + 2 confirmed BMKG alerts + critical water at multiple gates",
+      "expected_behavior": "risk_level DANGER \u2014 compound_risk signal active across all three hazard categories simultaneously",
+      "scenario_metadata": {
+        "real_world_reference": "Jakarta compound flood event, 17 January 2013. Simultaneous extreme rainfall (65 mm/h at Kemayoran), two confirmed BMKG Extreme alerts, Manggarai at 870 cm (Siaga 2), Katulampa at 940 cm (Siaga 1). All three hazard categories triggered concurrently \u2014 the canonical compound_risk scenario.",
+        "expected_behavior": "compound_risk signal must be active. risk_level must be DANGER. All three hazard categories (rainfall, hydrology, BMKG) contribute simultaneously. system_status should be OK (all signals agree \u2014 no conflict). High confidence DANGER classification expected.",
+        "hydrology_context": "Full catchment saturation; coastal tidal effect possible at Penjaringan.",
+        "monsoon_phase": "peak_wet_season"
+      },
+      "plausibility": {
+        "plausibility_score": 1.0,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {
+          "temp_c": 1.0,
+          "humidity_pct": 1.0,
+          "rainfall_1h_mm": 1.0,
+          "rainfall_3h_mm": 1.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 1.0
+        },
+        "combo_flags": []
+      },
+      "output": {
+        "system_status": "CONFLICT",
+        "requires_manual_review": true,
+        "risk_level": "DANGER",
+        "probability": 0.0628,
+        "confidence_score": 0.1678,
+        "decision_summary": "Physical flood conditions at Katulampa (SIAGA1) override the ML model \u2014 immediate protective action is required regardless of computational confidence.",
+        "final_reason": "Physical water-level measurements at Katulampa (SIAGA1) (severity 1.00) override the ML model and mandate DANGER classification.",
+        "dominant_risk_driver": "compound_event",
+        "risk_interpretation": "Compound event detected: concurrent extreme rainfall, elevated water level, and official BMKG alerts are mutually reinforcing. Multi-hazard overlap elevates actual flood risk well beyond any single indicator threshold. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution.",
+        "recommended_action": [
+          "IMMEDIATE: Activate evacuation protocols for flood-prone zones near water-monitoring stations exceeding threshold ratio.",
+          "IMMEDIATE: Notify emergency response teams for standby deployment.",
+          "IMMEDIATE: Issue multi-agency emergency coordination alert \u2014 compound flood event conditions are active.",
+          "IMMEDIATE: Restrict access to historically flooded corridors pending field assessment.",
+          "HIGH PRIORITY: Cross-reference BMKG alert details with water-gate operations. Confirm gate opening status and spillway capacity.",
+          "Inspect and clear urban drainage inlets in flood-prone districts. High-intensity rainfall may overwhelm standard drainage capacity.",
+          "Alert downstream basin coordinators \u2014 sustained rainfall accumulation will likely propagate as a downstream surge within 1\u20133 hours.",
+          "High atmospheric humidity indicates additional rainfall likely even if current BMKG alert intensity appears moderate. Maintain elevated operational readiness.",
+          "Deploy field verification teams to the top 3 flood-prone areas for ground-truth validation of sensor readings.",
+          "Hydrological-meteorological index elevated \u2014 coordinate with BPBD for pre-emptive resource staging at high-risk districts.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "physical_override",
+        "decision_trace": [
+          "[L1-PHYSICAL] Katulampa SIAGA1 (severity=1.00) overrides ML output (DANGER)",
+          "[L1-PHYSICAL] \u2192 Risk escalated to DANGER (physical confidence: high)",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0544 (\u00d70.800)",
+          "[FINAL] risk=DANGER, confidence=0.2178, source=physical_override"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal"
+          ],
+          "classification_basis": "prob 0.0628 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0544,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.2178
+        },
+        "override_trace": {
+          "triggered": true,
+          "reason": "Katulampa at SIAGA1 (severity=1.00) \u2014 critical water level confirmed by BPBD operational thresholds",
+          "confidence": "high",
+          "hydrology_severity": 1.0,
+          "dominant_station": "Katulampa",
+          "dominant_siaga": "siaga1"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.2178,
+          "model_only_score": 0.5422,
+          "baseline_only_score": 0.4077,
+          "agentic_improvement_over_model": -0.3244,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "CRITICAL: Katulampa at Siaga 1 (960 cm). Immediate flood risk \u2014 highest alert. 2 stations at critical levels \u2014 compound hydrology risk. 1 station(s) approaching next alert level. Alert: Manggarai approaching next alert threshold \u2014 escalation possible within the current prediction window.",
+        "hydrology_assessment": {
+          "severity_score": 1.0,
+          "dominant_station": "Katulampa",
+          "dominant_siaga_level": "siaga1",
+          "critical_station_count": 2,
+          "near_threshold_count": 1,
+          "rapid_escalation": false,
+          "overall_explanation": "CRITICAL: Katulampa at Siaga 1 (960 cm). Immediate flood risk \u2014 highest alert. 2 stations at critical levels \u2014 compound hydrology risk. 1 station(s) approaching next alert level.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 895.0,
+              "siaga_level": "siaga2",
+              "severity_score": 0.75,
+              "water_level_ratio": 0.9421,
+              "near_threshold": true,
+              "near_threshold_margin_cm": 55.0,
+              "next_siaga_level": "siaga1",
+              "explanation": "Manggarai: 895 cm \u2014 Siaga 2 (severe). Approaching Siaga 1 \u2014 imminent escalation."
+            },
+            {
+              "station_id": "katulampa",
+              "station_name": "Katulampa",
+              "tinggi_air_cm": 960.0,
+              "siaga_level": "siaga1",
+              "severity_score": 1.0,
+              "water_level_ratio": 1.2,
+              "near_threshold": false,
+              "near_threshold_margin_cm": 0.0,
+              "next_siaga_level": "",
+              "explanation": "Katulampa: 960 cm \u2014 AT SIAGA 1 (critical). Flood conditions active at highest alert threshold."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "signal_conflict",
+            "severity": "high",
+            "message": "Model probability (0.06) is lower than the rule-based baseline (0.66) by 0.59. Manual review required before operational action.",
+            "detail": {
+              "model_prob": 0.0628,
+              "baseline_prob": 0.6551,
+              "gap": 0.5923
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.127). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.1274,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.6551,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.8079,
+            "components": {
+              "intensity_1h": 0.75,
+              "accumulation_3h": 0.7,
+              "sustained_rolling": 0.6
+            },
+            "alert": true
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.53,
+            "components": {
+              "water_level_ratio": 0.9,
+              "water_level_delta": 0.0,
+              "bmkg_support": 0.3,
+              "hmi_component": 0.35
+            },
+            "alert": true
+          },
+          "baseline_disagreement": 0.5923,
+          "baseline_alert": true,
+          "model_vs_baseline": "model_lower"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": true,
+          "high_rainfall": true,
+          "sustained_rainfall": true,
+          "critical_water_level": true,
+          "high_water_level": true,
+          "rising_water": false,
+          "rapid_rise": false,
+          "hydro_stress": false,
+          "bmkg_extreme": true,
+          "bmkg_moderate": true,
+          "bmkg_confirmed": true,
+          "compound_risk": true,
+          "atmosphere_saturated": true,
+          "monsoon_context": false,
+          "hmi_high": true,
+          "dominant_driver": "compound_event"
+        },
+        "diagnostics": {
+          "history_rows_used": 112,
+          "temporal_features_ready": true,
+          "bmkg_source": "observed_alerts",
+          "water_level_records": 2
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.3622,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.5039,
+          "composite_trust": 0.6138,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "Signal conflict detected: internal ML model and rule-based physical baseline produce contradictory risk assessments. Current determination is DANGER, but opposing signals are present. Cross-reference with direct sensor readings before acting.",
+        "timestamp_utc": "2026-04-24T10:40:41.365744+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": "11 active flood zone(s): 11 high-severity, 0 medium-severity. Supply 'origin' and 'destination' for a concrete flood-safe route recommendation.",
+          "reason": "Risk level DANGER detected \u2014 flood-zone avoidance is active. Provide 'origin' and 'destination' query parameters for a routed recommendation.",
+          "flood_zones_checked": 11,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:42.037386+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 755.6
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "compound_risk",
+        "predicted_risk": "DANGER",
+        "expected_risk": "DANGER",
+        "predicted_status": "CONFLICT",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.1678,
+        "correctness_score": 1.0,
+        "robustness_score": 0.1678,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    },
+    {
+      "scenario_name": "safe_baseline",
+      "input_summary": "Clear dry-season conditions: minimal rain (0.3 mm/h), no BMKG alerts, water level well below threshold",
+      "expected_behavior": "risk_level SAFE \u2014 all signals within normal range, no failures expected",
+      "scenario_metadata": {
+        "real_world_reference": "Jakarta dry season baseline, August\u2013September. Kemayoran AWS records 0\u20132 mm/h rainfall, humidity 55\u201365%, water levels at 150\u2013200 cm (far below Siaga 4 at 750 cm). No BMKG alerts. Typical daily conditions for 6\u20138 months/year.",
+        "expected_behavior": "risk_level must be SAFE. system_status must be OK. No failure_modes expected. All signal scores within background noise thresholds. High confidence SAFE classification with no manual review required.",
+        "hydrology_context": "Low base flow; drainage not stressed; monsoon inactive.",
+        "monsoon_phase": "dry_season"
+      },
+      "plausibility": {
+        "plausibility_score": 1.0,
+        "is_plausible": true,
+        "violations": [],
+        "field_scores": {
+          "temp_c": 1.0,
+          "humidity_pct": 1.0,
+          "rainfall_1h_mm": 1.0,
+          "pressure_hpa": 1.0,
+          "wind_speed_ms": 1.0,
+          "water_level_cm": 1.0
+        },
+        "combo_flags": []
+      },
+      "output": {
+        "system_status": "DEGRADED",
+        "requires_manual_review": true,
+        "risk_level": "SAFE",
+        "probability": 0.037,
+        "confidence_score": 0.2593,
+        "decision_summary": "No active flood threat detected across all monitored channels (31% confidence) \u2014 routine monitoring is appropriate.",
+        "final_reason": "Model confidence reduced by calibration penalty (ECE=0.378) \u2014 final SAFE assessment reflects adjusted, more conservative confidence.",
+        "dominant_risk_driver": "high_rainfall",
+        "risk_interpretation": "Multi-source signals are within normal operating range. No immediate flood indication from rainfall intensity, official alerts, or current water conditions. Continued routine monitoring is appropriate. Caveat: one or more input data sources are missing \u2014 this interpretation reflects partial observability. Caveat: conflicting signals detected across data sources. Manual cross-verification is recommended before operational action. Caveat: input features are partially outside the model's training distribution. Treat the probability estimate with additional caution.",
+        "recommended_action": [
+          "Inspect and clear urban drainage inlets in flood-prone districts. High-intensity rainfall may overwhelm standard drainage capacity.",
+          "Hydrological-meteorological index elevated \u2014 coordinate with BPBD for pre-emptive resource staging at high-risk districts.",
+          "DATA: Restore missing sensor feeds immediately. Current assessment operates under reduced observability.",
+          "DATA: Manually review conflicting sensor readings before issuing public advisories."
+        ],
+        "decision_source": "ml_adaptive",
+        "decision_trace": [
+          "[L3-ML] probability=0.0370 \u2192 SAFE (system: DEGRADED, confidence: 0.3866)",
+          "[L3-ML] Adaptive threshold raised by +0.100 to 0.550 \u2014 context-adjusted classification",
+          "[CALIBRATION] ECE=0.378 \u2192 confidence penalised by 0.0773 (\u00d70.800)",
+          "[FINAL] risk=SAFE, confidence=0.3093, source=ml_adaptive"
+        ],
+        "adaptive_threshold": {
+          "danger_threshold": 0.55,
+          "base_threshold": 0.45,
+          "net_adjustment": 0.1,
+          "adjustment_factors": [
+            "OOD input \u2014 sensor malfunction likely; extreme values are noise, not signal",
+            "Missing data \u2014 cannot independently verify extreme conditions"
+          ],
+          "classification_basis": "prob 0.0370 < SAFE ceiling 0.20 (no context adjustment applied)"
+        },
+        "confidence_adjustment": {
+          "calibration_penalty": 0.0773,
+          "calibration_ece": 0.3784,
+          "applied": true,
+          "reason": "ECE=0.378 exceeds threshold 0.1 \u2014 model shows calibration overconfidence under current conditions",
+          "final_confidence": 0.3093
+        },
+        "override_trace": {
+          "triggered": false,
+          "reason": "",
+          "confidence": "n/a",
+          "hydrology_severity": 0.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga": "normal"
+        },
+        "inconsistency_check": {
+          "detected": false,
+          "reason": ""
+        },
+        "scenario_comparison": {
+          "agentic_system_score": 0.3093,
+          "model_only_score": 0.6116,
+          "baseline_only_score": 0.9303,
+          "agentic_improvement_over_model": -0.3023,
+          "interpretation": "agentic_system_score reflects all pipeline adjustments (failure penalties, calibration, trust); model_only_score is raw ML confidence before agentic layers; baseline_only_score is rule-based estimate agreement (1 \u2212 disagreement)."
+        },
+        "hydrology_narrative": "All monitored stations within normal range.",
+        "hydrology_assessment": {
+          "severity_score": 0.0,
+          "dominant_station": "Manggarai",
+          "dominant_siaga_level": "normal",
+          "critical_station_count": 0,
+          "near_threshold_count": 0,
+          "rapid_escalation": false,
+          "overall_explanation": "All monitored stations within normal range.",
+          "stations": [
+            {
+              "station_id": "manggarai",
+              "station_name": "Manggarai",
+              "tinggi_air_cm": 175.0,
+              "siaga_level": "normal",
+              "severity_score": 0.0,
+              "water_level_ratio": 0.1842,
+              "near_threshold": false,
+              "near_threshold_margin_cm": 0.0,
+              "next_siaga_level": "",
+              "explanation": "Manggarai: 175 cm \u2014 Normal range."
+            }
+          ]
+        },
+        "failure_modes": [
+          {
+            "type": "missing_data",
+            "severity": "low",
+            "message": "Section 'bmkg_alerts' is empty \u2014 BMKG meteorological alerts unavailable.",
+            "detail": {
+              "section": "bmkg_alerts",
+              "count": 0
+            }
+          },
+          {
+            "type": "signal_conflict",
+            "severity": "low",
+            "message": "Sustained heavy rainfall (3h mean 238.4 mm) without a corresponding water-level response (ratio 0.18). Possible: spatial mismatch, functioning drainage, or sensor not in flood zone.",
+            "detail": {
+              "rainfall_roll3_mean": 238.4333333333333,
+              "water_level_ratio": 0.18421052631578946
+            }
+          },
+          {
+            "type": "ood_input",
+            "severity": "medium",
+            "message": "Input features flagged as out-of-distribution by IsolationForest (score=-0.114). Model was not trained on conditions resembling the current observation.",
+            "detail": {
+              "ood_score": -0.1142,
+              "method": "IsolationForest"
+            }
+          },
+          {
+            "type": "external_source_unreliable",
+            "severity": "high",
+            "message": "TMA scraping proxy is invalid \u2014 real-time water-level data cannot be independently verified. Hydrology signals have reduced confidence.",
+            "detail": {
+              "source": "scraping_proxy",
+              "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+              "reliability": "low",
+              "tma_status": "INVALID"
+            },
+            "confidence_penalty": 0.05
+          }
+        ],
+        "baseline_check": {
+          "baseline_probability": 0.1067,
+          "rainfall_baseline": {
+            "rainfall_baseline_probability": 0.16,
+            "components": {
+              "intensity_1h": 0.05,
+              "accumulation_3h": 0.05,
+              "sustained_rolling": 0.6
+            },
+            "alert": false
+          },
+          "hydro_baseline": {
+            "hydro_baseline_probability": 0.063,
+            "components": {
+              "water_level_ratio": 0.05,
+              "water_level_delta": 0.0,
+              "bmkg_support": 0.02,
+              "hmi_component": 0.35
+            },
+            "alert": false
+          },
+          "baseline_disagreement": 0.0697,
+          "baseline_alert": false,
+          "model_vs_baseline": "agree"
+        },
+        "data_freshness_minutes": 0.0,
+        "signals": {
+          "extreme_rainfall": false,
+          "high_rainfall": true,
+          "sustained_rainfall": false,
+          "critical_water_level": false,
+          "high_water_level": false,
+          "rising_water": false,
+          "rapid_rise": false,
+          "hydro_stress": false,
+          "bmkg_extreme": false,
+          "bmkg_moderate": false,
+          "bmkg_confirmed": false,
+          "compound_risk": false,
+          "atmosphere_saturated": false,
+          "monsoon_context": false,
+          "hmi_high": true,
+          "dominant_driver": "high_rainfall"
+        },
+        "diagnostics": {
+          "history_rows_used": 113,
+          "temporal_features_ready": true,
+          "bmkg_source": "no_alert",
+          "water_level_records": 1
+        },
+        "trust_breakdown": {
+          "model_confidence_factor": 0.4316,
+          "data_quality_factor": 1.0,
+          "signal_agreement_factor": 0.7651,
+          "composite_trust": 0.6972,
+          "is_low_trust": false,
+          "dominant_trust_issue": "model_confidence",
+          "factor_weights": {
+            "model_confidence": 0.45,
+            "data_quality": 0.35,
+            "signal_agreement": 0.2
+          }
+        },
+        "system_interpretation": "System operating in DEGRADED mode due to missing data source(s), out-of-distribution input features. Risk assessment (SAFE) carries reduced confidence (31%). Maintain elevated operational readiness and validate with field observations.",
+        "timestamp_utc": "2026-04-24T10:40:42.079051+00:00",
+        "pipeline_version": "agentic-v2.0",
+        "model_name": "XGBoost Flood Predictor - Realtime Native",
+        "safe_route": {
+          "available": false,
+          "distance_km": null,
+          "eta_minutes": null,
+          "safety_score": null,
+          "combined_score": null,
+          "summary": null,
+          "confidence": null,
+          "advisory": null,
+          "reason": "Risk level is SAFE \u2014 route planning not required.",
+          "flood_zones_checked": 0,
+          "alternatives_evaluated": 0
+        },
+        "tma_data": {
+          "status": "INVALID",
+          "reason": "Both 'time' and 'ketinggian' fields are absent or empty.",
+          "source": "scraping_proxy",
+          "reliability": "low",
+          "fetched_at": "2026-04-24T10:40:42.862449+00:00",
+          "data": []
+        },
+        "trend_analysis": {
+          "risk_delta_1h": 0.0,
+          "risk_trend": "insufficient_data",
+          "water_level_trend": "insufficient_data",
+          "rainfall_trend": "insufficient_data",
+          "data_points": 1,
+          "risk_rate_per_hour": 0.0,
+          "trend_strength": 0.0,
+          "trend_confidence": 0.0,
+          "anomaly_detected": false,
+          "anomaly_type": null
+        },
+        "pipeline_execution_ms": 824.5
+      },
+      "is_reasonable": true,
+      "metric_record": {
+        "scenario_name": "safe_baseline",
+        "predicted_risk": "SAFE",
+        "expected_risk": "SAFE",
+        "predicted_status": "DEGRADED",
+        "expected_status": "NOT_OK",
+        "has_failures": true,
+        "expected_failures": true,
+        "risk_correct": true,
+        "status_correct": true,
+        "failure_detection_correct": true,
+        "confidence": 0.2593,
+        "correctness_score": 1.0,
+        "robustness_score": 0.2593,
+        "overconfidence_flag": false,
+        "underreaction_flag": false
+      }
+    }
+  ],
+  "quantitative_metrics": {
+    "n_evaluated": 7,
+    "risk_classification": {
+      "accuracy": 1.0,
+      "macro_f1": 1.0,
+      "weighted_f1": 1.0,
+      "per_class": {
+        "SAFE": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0
+        },
+        "WARNING": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 1,
+          "tp": 1,
+          "fp": 0,
+          "fn": 0
+        },
+        "DANGER": {
+          "precision": 1.0,
+          "recall": 1.0,
+          "f1": 1.0,
+          "support": 3,
+          "tp": 3,
+          "fp": 0,
+          "fn": 0
+        }
+      },
+      "confusion_matrix": {
+        "SAFE": {
+          "SAFE": 3,
+          "WARNING": 0,
+          "DANGER": 0
+        },
+        "WARNING": {
+          "SAFE": 0,
+          "WARNING": 1,
+          "DANGER": 0
+        },
+        "DANGER": {
+          "SAFE": 0,
+          "WARNING": 0,
+          "DANGER": 3
+        }
+      }
+    },
+    "danger_false_negative_rate": 0.0,
+    "danger_fnr_verdict": "PASS \u2014 zero DANGER false negatives",
+    "danger_fnr_detail": {
+      "false_negative_rate": 0.0,
+      "true_positives": 3,
+      "false_negatives": 0,
+      "total_actual_danger": 3,
+      "missed_classified_as": {
+        "SAFE": 0,
+        "WARNING": 0
+      },
+      "operational_risk_level": "ACCEPTABLE",
+      "verdict": "PASS \u2014 zero DANGER false negatives"
+    },
+    "system_status": {
+      "accuracy": 1.0,
+      "false_ok_rate": 0.0,
+      "n_correct": 7,
+      "n_false_ok": 0,
+      "n_evaluated": 7
+    },
+    "failure_detection": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "tp": 7,
+      "fp": 0,
+      "fn": 0
+    },
+    "critical_failure_type_accuracy": 1.0,
+    "overall_pass_rate": 1.0,
+    "overall_passed": 7,
+    "calibration": {
+      "n": 7,
+      "brier_score": 0.3772,
+      "ece": 0.3784,
+      "mce": 0.3784,
+      "mean_predicted_probability": 0.0502,
+      "mean_observed_frequency": 0.4286,
+      "overconfidence_direction": "underconfident",
+      "interpretations": {
+        "brier_score": "poor (0.3772 > 0.2)",
+        "ece": "miscalibrated (0.3784 > 0.1)",
+        "small_n_warning": "n=7 \u2014 metrics are directional indicators only, not statistically reliable estimates."
+      },
+      "calibration_curve": [
+        {
+          "bin_low": 0.0,
+          "bin_high": 0.1,
+          "mean_predicted_prob": 0.0502,
+          "fraction_positive": 0.4286,
+          "count": 7,
+          "gap": -0.3784
+        },
+        {
+          "bin_low": 0.1,
+          "bin_high": 0.2,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.2,
+          "bin_high": 0.3,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.3,
+          "bin_high": 0.4,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.4,
+          "bin_high": 0.5,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.5,
+          "bin_high": 0.6,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.6,
+          "bin_high": 0.7,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.7,
+          "bin_high": 0.8,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.8,
+          "bin_high": 0.9,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        },
+        {
+          "bin_low": 0.9,
+          "bin_high": 1.0,
+          "mean_predicted_prob": null,
+          "fraction_positive": null,
+          "count": 0,
+          "gap": null
+        }
+      ]
+    },
+    "scenario_scoring": {
+      "total_score": 1.0,
+      "weakest_scenario": "missing_data",
+      "weakest_correctness_score": 1.0,
+      "strongest_scenario": "signal_conflict",
+      "strongest_correctness_score": 1.0,
+      "overconfidence_count": 0,
+      "underreaction_count": 0,
+      "per_scenario": [
+        {
+          "scenario_name": "extreme_rainfall",
+          "correctness_score": 1.0,
+          "robustness_score": 0.1515,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "hydrology_spike",
+          "correctness_score": 1.0,
+          "robustness_score": 0.2294,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "signal_conflict",
+          "correctness_score": 1.0,
+          "robustness_score": 0.2706,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "missing_data",
+          "correctness_score": 1.0,
+          "robustness_score": 0.1059,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "ood_input",
+          "correctness_score": 1.0,
+          "robustness_score": 0.1775,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "compound_risk",
+          "correctness_score": 1.0,
+          "robustness_score": 0.1678,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        },
+        {
+          "scenario_name": "safe_baseline",
+          "correctness_score": 1.0,
+          "robustness_score": 0.2593,
+          "overconfidence_flag": false,
+          "underreaction_flag": false
+        }
+      ]
+    }
+  }
+}

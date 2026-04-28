@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep \"\\\\.py$\")",
+      "Bash(python -m pytest tests/test_failure_simulation.py --collect-only -q)",
+      "Bash(python -m pytest tests/test_failure_simulation.py --collect-only -q -p no:langsmith)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('tests/test_failure_simulation.py'\\).read\\(\\)\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py --collect-only -q)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/integration/test_flood_pipeline.py --collect-only -q)",
+      "Bash(flood_env/Scripts/pip install *)",
+      "Bash(flood_env/Scripts/pip uninstall *)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py -v)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py -v --tb=short)",
+      "Bash(flood_env/Scripts/python.exe -c ' *)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/ --tb=line -q --ignore=tests/test_failure_simulation.py)",
+      "Bash(git stash *)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/integration/test_flood_pipeline.py::test_pipeline_returns_required_keys --tb=line -q)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/unit/test_realtime_native_feature_builder.py -v --tb=short)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/test_flood_pipeline.py -v --tb=short)",
+      "Bash(flood_env/Scripts/python.exe -c \"from app.utils.paths import DEFAULT_REALTIME_SNAPSHOT as p; print\\('path:', p\\); print\\('parent:', p.parent\\); print\\('parent exists:', p.parent.exists\\(\\)\\); print\\('parent is_dir:', p.parent.is_dir\\(\\) if p.parent.exists\\(\\) else 'N/A'\\); print\\('parent.parent exists:', p.parent.parent.exists\\(\\)\\)\")",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/ tests/unit/test_realtime_native_feature_builder.py -q --tb=line)",
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/ tests/unit/test_realtime_native_feature_builder.py -q --tb=short)"
+    ]
+  }
+}

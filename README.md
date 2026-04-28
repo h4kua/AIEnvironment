@@ -1,170 +1,244 @@
 # Jakarta Flood Prediction System
 
-Advanced AI-Powered Flood Risk Prediction for Jakarta
+Sistem prediksi banjir Jakarta yang menggabungkan:
 
-## Project Overview
+- model historis berbasis XGBoost + SHAP
+- model `realtime-native` berbasis sinyal operasional
+- pipeline realtime dari Posko Banjir, BMKG Nowcast, dan OpenWeather
+- API FastAPI untuk inference produksi
 
-A production-ready machine learning solution for predicting flood risks in Jakarta. Combines advanced ML models, explainability analysis (SHAP), real-time weather integration, and threshold optimization.
+## Executive Summary
 
-## Key Features
+Project ini dirancang untuk kebutuhan kompetisi AI tingkat tinggi, dengan fokus pada:
 
-- Advanced ML Model: XGBoost with calibration
-- Explainability: SHAP analysis for interpretable predictions
-- Real-Time Integration: OpenWeather API
-- Threshold Optimization: F1-score optimized decision boundaries
-- Multi-Agent Architecture: Modular agents for monitoring
-- Production-Ready: Built for deployment
+- validitas ilmiah
+- konsistensi antara training dan inference
+- explainability dan Responsible AI
+- kesiapan deployment realtime
 
-## Quick Start
+Sistem menggunakan dua model:
 
-### Prerequisites
-- Python 3.8+
-- pip or conda
-- OpenWeather API key
+1. `legacy_geospatial`
+Model historis dengan feature geospasial yang kaya dan performa historis kuat.
 
-### Installation
+2. `realtime_native`
+Model ringan yang hanya memakai feature yang benar-benar tersedia saat inference realtime.
 
-```bash
-# Create virtual environment
-python -m venv flood_env
-source flood_env/bin/activate  # Windows: flood_env\Scripts\activate
+Pendekatan dual-model ini membantu narasi kompetisi:
 
-# Install dependencies
-pip install -r requirements.txt
+- model lama menunjukkan kekuatan baseline dan kedalaman historis
+- model baru menunjukkan kesesuaian operasional dan validitas deployment realtime
 
-# Configure environment
-cp .env.example .env
-# Edit .env and add your OpenWeather API key
-```
+## Architecture
 
-### Running the System
+### 1. Data Ingestion
 
-```bash
-# Using Jupyter Notebook
-jupyter notebook notebooks/production/jakarta_flood_prediction.ipynb
+Pipeline `poskobanjir/` mengambil data dari:
 
-# Or use Python API
-python -c "from app.agents.monitoring_agent import MonitoringAgent; m = MonitoringAgent(); print(m.predict_flood_risk())"
-```
+- Posko Banjir DKI
+- BMKG CAP / nowcast alerts
+- OpenWeather API
+
+Output utamanya:
+
+- `poskobanjir/data/clean/realtime_snapshot.json`
+
+### 2. Inference Layer
+
+`app/services/` menangani:
+
+- model loading
+- realtime adapter
+- prediction service
+- report refresh
+- data quality dan OOD monitoring
+
+`app/realtime_native/` menangani:
+
+- feature engineering realtime-native
+- bootstrap dataset building
+- training model baru
+- inference realtime-native
+
+### 3. API Layer
+
+FastAPI tersedia di:
+
+- `GET /health`
+- `GET /predict/realtime`
+- `GET /predict/realtime-native`
 
 ## Project Structure
 
+```text
+root/
+├── app/
+│   ├── api/
+│   ├── services/
+│   ├── realtime_native/
+│   ├── agents/
+│   └── utils/
+├── poskobanjir/
+├── artifacts/
+│   ├── production/
+│   ├── reports/
+│   ├── visualizations/
+│   ├── configurations/
+│   └── legacy_archive/
+├── models/
+├── data/
+│   ├── raw/
+│   └── processed/
+├── tests/
+├── docs/
+├── notebooks/
+├── requirements.txt
+├── pyproject.toml
+└── README.md
 ```
-JAKARTA-FLOOD-PREDICTION/
-|
-+-- app/                    Application code (agents, models, services)
-+-- data/                   Data management (raw, processed, external)
-+-- artifacts/              Production artifacts (models, configs, reports, visualizations)
-+-- notebooks/              Jupyter notebooks (exploratory, production)
-+-- deployment/             Deployment configs (docker, kubernetes)
-+-- tests/                  Test suites (unit, integration)
-+-- docs/                   Documentation (guides, architecture)
-|
-+-- .env.example            Environment variables template
-+-- .gitignore              Git ignore rules
-+-- requirements.txt        Python dependencies
-+-- setup.py                Package setup
-+-- pyproject.toml          Project metadata
-+-- README.md               This file
+
+## Canonical Runtime Files
+
+Model aktif:
+
+- `models/flood_model_jakarta.pkl`
+- `models/scaler_jakarta.pkl`
+- `models/optimal_threshold.json`
+- `models/feature_list_jakarta.json`
+- `models/model_card_jakarta.json`
+
+Model realtime-native:
+
+- `models/feature_list_realtime_native.json`
+- `models/model_card_realtime_native.json`
+- artefak training/inference dikelola oleh `app/realtime_native/training.py`
+
+Manifest produksi:
+
+- `artifacts/production/catalog.json`
+
+Laporan kompetisi:
+
+- `artifacts/reports/advanced_model_report.txt`
+- `artifacts/reports/project_summary.json`
+
+## Quick Start
+
+### 1. Install
+
+```bash
+python -m venv flood_env
+flood_env\Scripts\activate
+pip install -r requirements.txt
 ```
 
-## Model Performance
+### 2. Configure Environment
 
-| Metric | Value |
-|--------|-------|
-| Accuracy | ~85%+ |
-| Precision | ~83%+ |
-| Recall | ~82%+ |
-| F1-Score | ~0.82 |
-| ROC-AUC | ~0.90+ |
+Isi `.env` dengan:
 
-## Components
+- `OPENWEATHER_API_KEY`
+- koordinat Jakarta bila diperlukan
 
-### Data Pipeline
-- Raw data ingestion
-- Data cleaning & validation
-- Feature engineering (6 domain-specific features)
-- Processed data for training
+### 3. Build Latest Snapshot
 
-### ML Model
-- Base Model: XGBoost Classifier
-- Calibration: CalibratedClassifierCV
-- Optimization: GridSearchCV
-- High accuracy with balanced metrics
+```bash
+python poskobanjir/main.py
+```
 
-### Explainability
-- SHAP analysis for feature importance
-- Model decision breakdown
-- Transparent, interpretable predictions
+### 4. Run API
 
-### Real-Time Integration
-- OpenWeather API for live weather data
-- Dynamic feature transformation
-- Live prediction updates
+```bash
+uvicorn app.api.main:app --reload
+```
 
-### Monitoring Agents
-- Continuous flood risk monitoring
-- Threshold-based alert system
-- Risk classification (SAFE/WARNING/DANGER)
+### 5. Call Endpoints
 
-## Risk Classification
+```bash
+GET /predict/realtime
+GET /predict/realtime-native
+```
 
-| Level | Probability | Action |
-|-------|-------------|--------|
-| SAFE | < threshold*0.5 | Normal operations |
-| WARNING | threshold*0.5 - threshold | Prepare emergency measures |
-| DANGER | >= threshold | Activate emergency protocol |
+## Output Example
 
-## Documentation
+### Realtime Prediction
 
-- `docs/guides/RUNNING_INSTRUCTIONS.md` - Setup & running
-- `docs/guides/API_USAGE_GUIDE.py` - Python API examples
-- `docs/guides/ADVANCED_COMPONENTS_GUIDE.md` - Advanced features
-- `docs/architecture/` - System architecture
+```json
+{
+  "probability": 0.41,
+  "risk_level": "DANGER",
+  "confidence_score": 0.78,
+  "data_quality": {
+    "score": 0.81
+  },
+  "model_warning": [],
+  "explanation": [
+    {
+      "feature": "max_rainfall",
+      "impact": "increase_risk"
+    }
+  ]
+}
+```
+
+### Realtime-Native Prediction
+
+```json
+{
+  "model_variant": "realtime_native",
+  "probability": 0.47,
+  "risk_level": "DANGER",
+  "risk_interpretation": "Sinyal hujan, alert BMKG, atau kenaikan muka air menunjukkan risiko banjir aktif/meningkat.",
+  "recommended_action": [
+    "Aktifkan koordinasi posko dan validasi lapangan di titik rawan."
+  ],
+  "ood_detection": {
+    "method": "IsolationForest",
+    "is_outlier": false
+  }
+}
+```
+
+## Scientific Positioning
+
+### Legacy Historical Model
+
+Kelebihan:
+
+- kaya feature historis dan geospasial
+- performa baseline kuat
+
+Keterbatasan:
+
+- perlu adapter untuk feature yang tidak tersedia langsung saat realtime
+
+### Realtime-Native Model
+
+Kelebihan:
+
+- feature training dan inference selaras
+- lebih ringan
+- lebih mudah dijelaskan ke reviewer non-teknis
+
+Keterbatasan:
+
+- histori observasional realtime penuh belum lengkap
+- bootstrap dataset masih memakai proxy yang ditandai eksplisit
 
 ## Testing
 
 ```bash
-# Run all tests
-pytest
-
-# Unit tests only
 pytest tests/unit/
-
-# With coverage
-pytest --cov=app tests/
 ```
 
-## Docker Deployment
+## Important Notes For Reviewers
 
-```bash
-# Build image
-docker build -f deployment/docker/Dockerfile -t jakarta-flood:latest .
+- File lama tidak dihapus langsung; semuanya dipindahkan ke `artifacts/legacy_archive/`
+- Struktur runtime aktif dipertahankan bersih agar mudah diaudit
+- `advanced_model_report.txt` dan `project_summary.json` tetap dipertahankan sebagai artefak kompetisi utama
 
-# Run container
-docker run -e OPENWEATHER_API_KEY=your_key -p 8000:8000 jakarta-flood:latest
-```
+## Useful References
 
-## Kubernetes Deployment
-
-```bash
-# Deploy to Kubernetes
-kubectl apply -f deployment/kubernetes/
-
-# Check status
-kubectl get pods
-```
-
-## License
-
-MIT License - see LICENSE file for details
-
-## Contact
-
-For questions or support, please contact the team.
-
----
-
-Status: Production Ready
-Version: 1.0.0
-Last Updated: 2026-04-09
+- `docs/guides/REALTIME_NATIVE_MODEL_GUIDE.md`
+- `docs/guides/API_USAGE_GUIDE.py`
+- `artifacts/production/catalog.json`
+- `artifacts/legacy_archive/README.md`

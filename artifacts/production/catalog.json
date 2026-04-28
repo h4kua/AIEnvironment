@@ -1,0 +1,30 @@
+{
+  "runtime_models": {
+    "model": "models/flood_model_jakarta.pkl",
+    "scaler": "models/scaler_jakarta.pkl",
+    "feature_list": "models/feature_list_jakarta.json",
+    "threshold": "models/optimal_threshold.json",
+    "model_card": "models/model_card_jakarta.json",
+    "realtime_native_model": "models/flood_model_realtime_native.pkl",
+    "realtime_native_scaler": "models/scaler_realtime_native.pkl",
+    "realtime_native_ood": "models/ood_detector_realtime_native.pkl",
+    "realtime_native_feature_list": "models/feature_list_realtime_native.json",
+    "realtime_native_model_card": "models/model_card_realtime_native.json"
+  },
+  "runtime_configuration": {
+    "realtime_baselines": "artifacts/configurations/realtime_feature_baselines_jakarta.json"
+  },
+  "runtime_reports": {
+    "advanced_model_report": "artifacts/reports/advanced_model_report.txt",
+    "project_summary": "artifacts/reports/project_summary.json",
+    "latest_realtime_prediction": "artifacts/reports/latest_realtime_prediction.json",
+    "realtime_native_comparison": "artifacts/reports/realtime_native_model_comparison.json"
+  },
+  "runtime_services": {
+    "prediction_service": "app/services/prediction_service.py",
+    "api": "app/api/main.py",
+    "realtime_pipeline_input": "poskobanjir/data/clean/realtime_snapshot.json",
+    "realtime_native_training": "app/realtime_native/training.py",
+    "realtime_native_inference": "app/realtime_native/inference.py"
+  }
+}

@@ -1,0 +1,381 @@
+{
+  "generated_at": "2026-04-25T08:10:19.473255+00:00",
+  "district": "Jakarta Timur",
+  "simulations": [
+    {
+      "date": "2013-01-09",
+      "district": "Jakarta Timur",
+      "predicted_risk": "DANGER",
+      "actual_event": true,
+      "lead_time_signal": 4.0,
+      "lead_time_warning": 4.0,
+      "lead_time_hours": 4.0,
+      "historical_context": {
+        "known_event": true,
+        "severity": 0.8296,
+        "class": "EXTREME"
+      },
+      "decision_explanation": "This area has a history of severe flooding (severity=0.83, class=EXTREME). Increase response priority.",
+      "trigger_explanation": "T-4h | DANGER (prob=0.046) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, rising_water, hydro_stress]",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2014-02-08",
+      "district": "Jakarta Timur",
+      "predicted_risk": "DANGER",
+      "actual_event": true,
+      "lead_time_signal": 4.0,
+      "lead_time_warning": 4.0,
+      "lead_time_hours": 4.0,
+      "historical_context": {
+        "known_event": true,
+        "severity": 0.5138,
+        "class": "HIGH"
+      },
+      "decision_explanation": "Historical event confirmed (severity=0.51, class=HIGH). System correctly issued DANGER.",
+      "trigger_explanation": "T-4h | DANGER (prob=0.046) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, rising_water, hydro_stress]",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2015-12-07",
+      "district": "Jakarta Timur",
+      "predicted_risk": "WARNING",
+      "actual_event": true,
+      "lead_time_signal": 2.0,
+      "lead_time_warning": 2.0,
+      "lead_time_hours": 2.0,
+      "historical_context": {
+        "known_event": true,
+        "severity": 0.0529,
+        "class": "LOW"
+      },
+      "decision_explanation": "Historical event confirmed (severity=0.05, class=LOW). System correctly issued WARNING.",
+      "trigger_explanation": "T-2h | WARNING (prob=0.062) | driver=sustained_heavy_rainfall | signals=[high_rainfall, sustained_rainfall, high_water_level, atmosphere_saturated, hmi_high, consistent_buildup]",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2017-02-12",
+      "district": "Jakarta Timur",
+      "predicted_risk": "DANGER",
+      "actual_event": true,
+      "lead_time_signal": 3.0,
+      "lead_time_warning": 3.0,
+      "lead_time_hours": 3.0,
+      "historical_context": {
+        "known_event": true,
+        "severity": 0.35,
+        "class": "MEDIUM"
+      },
+      "decision_explanation": "Historical event confirmed (severity=0.35, class=MEDIUM). System correctly issued DANGER.",
+      "trigger_explanation": "T-3h | DANGER (prob=0.048) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, bmkg_moderate, bmkg_confirmed]",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2019-04-30",
+      "district": "Jakarta Timur",
+      "predicted_risk": "WARNING",
+      "actual_event": true,
+      "lead_time_signal": 2.0,
+      "lead_time_warning": 2.0,
+      "lead_time_hours": 2.0,
+      "historical_context": {
+        "known_event": true,
+        "severity": 0.2188,
+        "class": "LOW"
+      },
+      "decision_explanation": "Historical event confirmed (severity=0.22, class=LOW). System correctly issued WARNING.",
+      "trigger_explanation": "T-2h | WARNING (prob=0.062) | driver=sustained_heavy_rainfall | signals=[high_rainfall, sustained_rainfall, high_water_level, atmosphere_saturated, hmi_high, consistent_buildup]",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2021-08-15",
+      "district": "Jakarta Timur",
+      "predicted_risk": "SAFE",
+      "actual_event": false,
+      "lead_time_signal": null,
+      "lead_time_warning": null,
+      "lead_time_hours": null,
+      "historical_context": {
+        "known_event": false,
+        "severity": 0.0,
+        "class": "LOW"
+      },
+      "decision_explanation": "Baseline (non-event) simulation. No flood recorded for this date and district.",
+      "trigger_explanation": "",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2022-08-20",
+      "district": "Jakarta Timur",
+      "predicted_risk": "SAFE",
+      "actual_event": false,
+      "lead_time_signal": null,
+      "lead_time_warning": null,
+      "lead_time_hours": null,
+      "historical_context": {
+        "known_event": false,
+        "severity": 0.0,
+        "class": "LOW"
+      },
+      "decision_explanation": "Baseline (non-event) simulation. No flood recorded for this date and district.",
+      "trigger_explanation": "",
+      "leakage_check": "PASS",
+      "robustness": null
+    },
+    {
+      "date": "2023-08-10",
+      "district": "Jakarta Timur",
+      "predicted_risk": "SAFE",
+      "actual_event": false,
+      "lead_time_signal": null,
+      "lead_time_warning": null,
+      "lead_time_hours": null,
+      "historical_context": {
+        "known_event": false,
+        "severity": 0.0,
+        "class": "LOW"
+      },
+      "decision_explanation": "Baseline (non-event) simulation. No flood recorded for this date and district.",
+      "trigger_explanation": "",
+      "leakage_check": "PASS",
+      "robustness": null
+    }
+  ],
+  "lead_time_metrics": {
+    "detection_rate": 1.0,
+    "false_alarm_rate": 0.0,
+    "avg_lead_time_warning_hours": 3.0,
+    "avg_lead_time_signal_hours": 3.0,
+    "early_detection_score": 0.8,
+    "worst_case_missed": [],
+    "n_true_events": 5,
+    "n_non_events": 3,
+    "n_detected": 5,
+    "n_false_alarms": 0
+  },
+  "leakage_violations": 0,
+  "robustness": [
+    {
+      "date": "2013-01-09",
+      "district": "Jakarta Timur",
+      "n_runs": 3,
+      "detection_rate": 1.0,
+      "avg_lead_time_warning_hours": 4.0,
+      "runs": [
+        {
+          "date": "2013-01-09",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.8296,
+            "class": "EXTREME"
+          },
+          "decision_explanation": "This area has a history of severe flooding (severity=0.83, class=EXTREME). Increase response priority.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.043) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, bmkg_extreme, bmkg_moderate]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2013-01-09",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.8296,
+            "class": "EXTREME"
+          },
+          "decision_explanation": "This area has a history of severe flooding (severity=0.83, class=EXTREME). Increase response priority.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.043) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, rising_water, hydro_stress]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2013-01-09",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.8296,
+            "class": "EXTREME"
+          },
+          "decision_explanation": "This area has a history of severe flooding (severity=0.83, class=EXTREME). Increase response priority.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.044) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, bmkg_extreme, bmkg_moderate]",
+          "leakage_check": "PASS",
+          "robustness": null
+        }
+      ]
+    },
+    {
+      "date": "2014-02-08",
+      "district": "Jakarta Timur",
+      "n_runs": 3,
+      "detection_rate": 1.0,
+      "avg_lead_time_warning_hours": 4.0,
+      "runs": [
+        {
+          "date": "2014-02-08",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.5138,
+            "class": "HIGH"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.51, class=HIGH). System correctly issued DANGER.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.045) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, bmkg_extreme, bmkg_moderate]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2014-02-08",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.5138,
+            "class": "HIGH"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.51, class=HIGH). System correctly issued DANGER.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.046) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, rising_water, hydro_stress]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2014-02-08",
+          "district": "Jakarta Timur",
+          "predicted_risk": "DANGER",
+          "actual_event": true,
+          "lead_time_signal": 4.0,
+          "lead_time_warning": 4.0,
+          "lead_time_hours": 4.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.5138,
+            "class": "HIGH"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.51, class=HIGH). System correctly issued DANGER.",
+          "trigger_explanation": "T-4h | DANGER (prob=0.045) | driver=compound_event | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, hydro_stress, bmkg_extreme]",
+          "leakage_check": "PASS",
+          "robustness": null
+        }
+      ]
+    },
+    {
+      "date": "2015-12-07",
+      "district": "Jakarta Timur",
+      "n_runs": 3,
+      "detection_rate": 1.0,
+      "avg_lead_time_warning_hours": 2.0,
+      "runs": [
+        {
+          "date": "2015-12-07",
+          "district": "Jakarta Timur",
+          "predicted_risk": "WARNING",
+          "actual_event": true,
+          "lead_time_signal": 2.0,
+          "lead_time_warning": 2.0,
+          "lead_time_hours": 2.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.0529,
+            "class": "LOW"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.05, class=LOW). System correctly issued WARNING.",
+          "trigger_explanation": "T-2h | WARNING (prob=0.060) | driver=hydrology_unverified | signals=[high_rainfall, sustained_rainfall, high_water_level, rising_water, hydro_stress, atmosphere_saturated]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2015-12-07",
+          "district": "Jakarta Timur",
+          "predicted_risk": "WARNING",
+          "actual_event": true,
+          "lead_time_signal": 2.0,
+          "lead_time_warning": 2.0,
+          "lead_time_hours": 2.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.0529,
+            "class": "LOW"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.05, class=LOW). System correctly issued WARNING.",
+          "trigger_explanation": "T-2h | WARNING (prob=0.063) | driver=extreme_rainfall | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, atmosphere_saturated, hmi_high]",
+          "leakage_check": "PASS",
+          "robustness": null
+        },
+        {
+          "date": "2015-12-07",
+          "district": "Jakarta Timur",
+          "predicted_risk": "WARNING",
+          "actual_event": true,
+          "lead_time_signal": 2.0,
+          "lead_time_warning": 2.0,
+          "lead_time_hours": 2.0,
+          "historical_context": {
+            "known_event": true,
+            "severity": 0.0529,
+            "class": "LOW"
+          },
+          "decision_explanation": "Historical event confirmed (severity=0.05, class=LOW). System correctly issued WARNING.",
+          "trigger_explanation": "T-2h | WARNING (prob=0.060) | driver=extreme_rainfall | signals=[extreme_rainfall, high_rainfall, sustained_rainfall, high_water_level, atmosphere_saturated, hmi_high]",
+          "leakage_check": "PASS",
+          "robustness": null
+        }
+      ]
+    }
+  ],
+  "ood_scenarios": {
+    "high_rainfall_low_water": {
+      "risk_level": "WARNING",
+      "probability": 0.0419,
+      "system_status": "CONFLICT",
+      "pass": true
+    },
+    "slow_rising_no_rain": {
+      "risk_level": "WARNING",
+      "probability": 0.0558,
+      "system_status": "DEGRADED",
+      "pass": true
+    },
+    "flash_flood_spike": {
+      "risk_level": "DANGER",
+      "probability": 0.3118,
+      "system_status": "CONFLICT",
+      "pass": true
+    },
+    "dry_season_baseline": {
+      "risk_level": "SAFE",
+      "probability": 0.0366,
+      "system_status": "DEGRADED",
+      "pass": true
+    }
+  },
+  "summary": "8 simulations (5 events, 3 non-events). Detection rate: 100%, False alarm rate: 0%, Avg lead_time_warning: 3.0h, Avg lead_time_signal: 3.0h. Early detection score: 0.800. Leakage violations: 0."
+}

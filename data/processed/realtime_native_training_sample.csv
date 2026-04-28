@@ -1,0 +1,4 @@
+timestamp,jakarta_region,name_3,rainfall_mm,rainfall_3h_proxy_mm,rainfall_lag_1,rainfall_lag_2,rainfall_roll3_mean,humidity_pct,temperature_c,bmkg_severity_score,bmkg_certainty_score,bmkg_urgency_score,bmkg_weighted_score,water_level_ratio,water_level_lag_1,water_level_delta,hydro_meteorological_index,monsoon_season,banjir,feature_provenance
+2024-01-01T00:00:00+00:00,Jakarta Utara,kelapagading,70.851,127.5318,62.100,54.700,62.5503,79.766,36.29,0.8,0.58,1.0,0.464,0.73,0.68,0.05,85.5186,1,0,bootstrap_proxy
+2024-02-01T00:00:00+00:00,Jakarta Pusat,senen,138.079,248.5422,76.764,64.883,93.2420,90.808,36.16,1.0,0.46,1.0,0.460,1.42,0.95,0.47,226.4531,1,0,bootstrap_proxy
+2024-03-01T00:00:00+00:00,Jakarta Selatan,makasar,66.078,118.9404,58.400,49.100,57.8593,70.593,38.58,0.8,0.29,1.0,0.232,0.68,0.54,0.14,69.4642,0,0,bootstrap_proxy

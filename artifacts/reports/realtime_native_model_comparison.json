@@ -1,0 +1,21 @@
+{
+  "legacy_geospatial_model": {
+    "strengths": [
+      "Lebih kaya konteks geospasial",
+      "Performa historis sudah tervalidasi"
+    ],
+    "limitations": [
+      "Inference realtime membutuhkan adapter untuk feature yang tidak tersedia langsung"
+    ]
+  },
+  "realtime_native_model": {
+    "strengths": [
+      "Training-inference feature alignment lebih baik",
+      "Lebih ringan dan lebih mudah dijelaskan ke juri"
+    ],
+    "limitations": [
+      "Saat ini masih memakai bootstrap proxy untuk sebagian histori operasional"
+    ]
+  },
+  "recommendation": "Gunakan model realtime-native untuk narasi operasional realtime, dan model legacy sebagai baseline pembanding sampai histori observasional penuh tersedia."
+}

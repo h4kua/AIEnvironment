@@ -1,0 +1,26 @@
+{
+  "dataset_path": "D:\\Buat Lomba\\data\\processed\\realtime_native_training_bootstrap.csv",
+  "feature_count": 16,
+  "training_rows": 2342,
+  "test_rows": 586,
+  "performance": {
+    "train_accuracy": 0.9666951323654995,
+    "test_accuracy": 0.9215017064846417,
+    "test_precision": 0.6923076923076923,
+    "test_recall": 0.32142857142857145,
+    "test_f1": 0.43902439024390244,
+    "test_roc_auc": 0.9285714285714286
+  },
+  "scientific_notes": {
+    "training_mode": "bootstrap_proxy_until_realtime_history_available",
+    "limitations": [
+      "Humidity, BMKG alert, dan water level historis belum tersedia observasional penuh.",
+      "Sebagian feature bootstrap masih diproksikan dari histori hujan Jakarta."
+    ],
+    "strengths": [
+      "Feature set kini 100% kompatibel dengan inference realtime.",
+      "Temporal lag dan rolling rainfall menambah konteks dinamika banjir.",
+      "Isolation Forest dipakai untuk OOD yang lebih robust."
+    ]
+  }
+}

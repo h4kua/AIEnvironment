@@ -1,0 +1,55 @@
+{
+  "citywide": {
+    "elevation": 17.025,
+    "ndvi": 0.257,
+    "slope": 0.128,
+    "soil_moisture": 37.539,
+    "lat": -6.2083,
+    "long": 106.8359,
+    "avg_rainfall": 28.412,
+    "max_rainfall": 56.056,
+    "avg_temperature": 37.891
+  },
+  "regions": {
+    "Jakarta Barat": {
+      "elevation": 7.525,
+      "ndvi": 0.212,
+      "slope": 0.083,
+      "soil_moisture": 36.795,
+      "lat": -6.1653,
+      "long": 106.7683
+    },
+    "Jakarta Pusat": {
+      "elevation": 8.943,
+      "ndvi": 0.214,
+      "slope": 0.093,
+      "soil_moisture": 36.897,
+      "lat": -6.1797,
+      "long": 106.8401
+    },
+    "Jakarta Selatan": {
+      "elevation": 28.721,
+      "ndvi": 0.308,
+      "slope": 0.179,
+      "soil_moisture": 38.386,
+      "lat": -6.2623,
+      "long": 106.8131
+    },
+    "Jakarta Timur": {
+      "elevation": 27.322,
+      "ndvi": 0.292,
+      "slope": 0.172,
+      "soil_moisture": 38.177,
+      "lat": -6.2586,
+      "long": 106.8881
+    },
+    "Jakarta Utara": {
+      "elevation": 3.79,
+      "ndvi": 0.228,
+      "slope": 0.079,
+      "soil_moisture": 36.9,
+      "lat": -6.1304,
+      "long": 106.8708
+    }
+  }
+}
