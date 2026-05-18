@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 import re
 import xml.etree.ElementTree as ET
 
+from app.services.bmkg_filter import filter_jakarta_bmkg_alerts
+
 
 CAP_NS = {"cap": "urn:oasis:names:tc:emergency:cap:1.2"}
 
@@ -95,6 +97,7 @@ def extract_alert_code(link):
 
 
 def build_realtime_snapshot(poskobanjir_records, weather, bmkg_feed, bmkg_alerts):
+    jakarta_alerts = filter_jakarta_bmkg_alerts(bmkg_alerts)
     return {
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
         "source_attribution": {
@@ -104,11 +107,11 @@ def build_realtime_snapshot(poskobanjir_records, weather, bmkg_feed, bmkg_alerts
         },
         "summary": {
             "total_poskobanjir_records": len(poskobanjir_records),
-            "total_bmkg_alerts": len(bmkg_alerts),
+            "total_bmkg_alerts": len(jakarta_alerts),
             "openweather_location": weather.get("name"),
         },
         "poskobanjir": poskobanjir_records,
         "openweather": weather,
         "bmkg_feed": bmkg_feed,
-        "bmkg_alerts": bmkg_alerts,
+        "bmkg_alerts": jakarta_alerts,
     }

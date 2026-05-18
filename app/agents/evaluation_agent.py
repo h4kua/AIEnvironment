@@ -15,17 +15,20 @@ It does not re-run the model or re-interpret signals.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+_log = logging.getLogger(__name__)
+
 from app.core.decision_core import UNCERTAINTY_MANUAL_REVIEW_THRESHOLD, DecisionCore, RiskState
+from app.services.confidence_engine import (
+    classify_ood_state,
+    compute_automation_confidence,
+    compute_sensor_reliability,
+)
 from app.services.decision_engine import DecisionResult, failsafe_decision, run_decision_engine
 from app.services.decision_logic import generate_recommended_action
-from app.services.failure_handling import (
-    compute_confidence_penalty,
-    has_danger_escalation,
-    has_risk_escalation,
-)
 from app.services.bnpb_context import VulnerabilityContext
 from app.services.bnpb_gate import (
     build_conflict_trace,
@@ -124,6 +127,8 @@ class EvaluationResult:
     # Allows downstream consumers to distinguish predictions made on physically
     # valid sensor data from predictions whose inputs failed the hard physical gate.
     plausibility: dict = field(default_factory=dict)
+    # Additive DEM enrichment carried through to ActionAgent output.
+    elevation: dict = field(default_factory=dict)
 
 
 class EvaluationAgent:
@@ -145,14 +150,17 @@ class EvaluationAgent:
         prediction = reasoning.prediction
         model_prob = prediction["probability"]
         model_confidence = prediction["confidence_score"]
-        model_risk = prediction["risk_level"]
+        # ReasoningAgent no longer emits a parallel risk classification.
+        # Legacy callers may still provide this key; if absent we use a
+        # conservative WARNING seed for the rare failsafe path only.
+        model_risk = prediction.get("risk_level") or "WARNING"
         failure_modes = reasoning.failure_modes
         baseline = reasoning.baseline_result
 
         # ── Confidence adjustment ────────────────────────────────────────────
-        failure_penalty = compute_confidence_penalty(failure_modes)
-        freshness_penalty = self._freshness_penalty(perception.data_freshness_minutes)
-        adjusted_confidence = max(0.05, model_confidence - failure_penalty - freshness_penalty)
+        ood_assessment = classify_ood_state(prediction.get("ood_detection"))
+        sensor_reliability = compute_sensor_reliability(perception, failure_modes)
+        adjusted_confidence = model_confidence
 
         # ── Three-factor trust breakdown (Task 5) ────────────────────────────
         trust_breakdown = compute_trust_breakdown(
@@ -162,37 +170,33 @@ class EvaluationAgent:
             snapshot_completeness=getattr(perception, "snapshot_completeness", 1.0),
             data_freshness_minutes=perception.data_freshness_minutes,
         )
+        adjusted_confidence = compute_automation_confidence(
+            model_confidence=model_confidence,
+            data_quality=trust_breakdown.data_quality_factor,
+            signal_agreement=trust_breakdown.signal_agreement_factor,
+            sensor_reliability=sensor_reliability,
+            ood_assessment=ood_assessment,
+        ).score
 
-        # ── Risk level (may be escalated by failure flags or physical channels) ─
-        # Hard architectural invariant: when the plausibility hard gate is closed
-        # (has_critical_violation=True) the ML risk_level cannot be promoted by
-        # any pre-engine path. The decision engine's L0 guard performs the final
-        # structural override; we simply avoid feeding it an inflated input.
+        # ── Risk level: defer to canonical decision authority (Phase 5) ──────
+        # Pre-engine escalation removed. The canonical decide() called via
+        # run_decision_engine() recomputes risk_level from scratch using the
+        # L0-L4 hierarchy. L2_INTEGRITY in canonical handles severe-failure
+        # escalation that this block previously performed (E5/E6 from the
+        # Phase 1 audit). Line ~245 below assigns
+        #     final_risk = decision.risk_level
+        # after the engine call, so the seed value here is purely informational
+        # and any pre-engine mutation would be silently overwritten.
         plausibility_dict = getattr(perception, "plausibility", {}) or {}
         has_critical_violation = bool(plausibility_dict.get("has_critical_violation", False))
-
         final_risk = model_risk
-        if not has_critical_violation:
-            if has_risk_escalation(failure_modes) and final_risk == "SAFE":
-                # Rapid water rise without rain is operationally important — escalate.
-                final_risk = "WARNING"
 
         features = reasoning.prediction.get("features", {})
         # Direct attribute access — no silent 1.0 default.
         # PerceptionResult.plausibility_score is always set by PerceptionAgent.run().
-        # If this raises, the pipeline catches it as PIPELINE_FAILURE rather than
-        # silently treating unvalidated data as fully trustworthy.
+        # If this raises, the pipeline catches it as PIPELINE_FAILURE rather
+        # than silently treating unvalidated data as fully trustworthy.
         _plaus_float = float(perception.plausibility_score)
-        if (
-            not has_critical_violation
-            and final_risk == "WARNING"
-            and has_danger_escalation(
-                signals=reasoning.signals,
-                features=features,
-                plausibility_score=_plaus_float,
-            )
-        ):
-            final_risk = "DANGER"
 
         # ── System status (uses trust breakdown for improved LOW_TRUST logic) ──
         system_status = self._determine_system_status(
@@ -202,6 +206,19 @@ class EvaluationAgent:
         # BNPB vulnerability context — carried from PerceptionAgent.
         vuln_context = getattr(perception, "vulnerability_context", None)
         mapping_info = getattr(perception, "mapping_info", {})
+        elevation_data = dict(getattr(perception, "elevation", {}) or {})
+        elevation_data.setdefault(
+            "rainfall_1h_mm",
+            float(features.get("rainfall_mm") or reasoning.signals.get("_rainfall_mm") or 0.0),
+        )
+        elevation_data.setdefault(
+            "rainfall_3h_mm",
+            float(features.get("rainfall_roll3_mean") or 0.0) * 3.0,
+        )
+        elevation_data.setdefault(
+            "water_level_delta",
+            float(reasoning.diagnostics.get("trend_state", {}).get("water_level_delta_cur") or 0.0),
+        )
 
         # ── BNPB activation gate ─────────────────────────────────────────────
         # Single authority: applied AFTER system_status is known (gate uses it).
@@ -232,6 +249,15 @@ class EvaluationAgent:
                 has_critical_violation=has_critical_violation,
                 trust_breakdown=trust_breakdown,
                 adaptive_classification=reasoning.prediction.get("adaptive_classification"),
+                # Real perception fields — required by canonical L0 invalid-input
+                # gate (completeness<0.30) and L2 DEGRADED escalation
+                # (freshness>60 or completeness<0.50). Previously hardcoded to
+                # 1.0/0.0 inside the adapter, making both gates unreachable.
+                perception_completeness=float(
+                    getattr(perception, "snapshot_completeness", 1.0) or 1.0
+                ),
+                data_freshness_minutes=float(perception.data_freshness_minutes),
+                elevation_data=elevation_data,
             )
         except Exception as exc:  # noqa: BLE001
             decision = failsafe_decision(
@@ -243,6 +269,24 @@ class EvaluationAgent:
         # Decision engine is the final authority — accept its risk and confidence.
         final_risk         = decision.risk_level
         adjusted_confidence = decision.confidence_score
+
+        # ── Phase 6: canonical-vs-agent system_status alignment ──────────────
+        # The canonical decide() in app.domain.decision is the only final
+        # authority for system_status. The agent's _determine_system_status
+        # remains a provisional, compatibility-only computation used by
+        # downstream gates before the canonical decision is available.
+        canonical_status = getattr(decision, "system_status", "") or ""
+        if canonical_status and canonical_status != system_status:
+            _log.warning(
+                "system_status divergence: agent=%s canonical=%s "
+                "decision_source=%s authority=%s failure_types=%s",
+                system_status,
+                canonical_status,
+                decision.decision_source,
+                decision.override_trace.get("authority", ""),
+                sorted({f.get("type") for f in failure_modes if isinstance(f, dict)}),
+            )
+            system_status = canonical_status
 
         # ── Full DecisionCore signal state (explainability + consistency) ─────
         # Built AFTER the decision engine so override_trace is available.
@@ -264,6 +308,8 @@ class EvaluationAgent:
         # These record an unusual signal combination for audit purposes.
         # Operators MUST act on risk_level (the official decision), not these notes.
         # The likely explanations are included so no ambiguity is left in the trace.
+        # INVARIANT: appending to decision_trace does NOT mutate final_risk or
+        # system_status — risk semantics are frozen before this block executes.
         if decision is not None:
             if risk_state.hazard_score > 0.8 and final_risk == "SAFE":
                 decision.decision_trace.append(
@@ -402,6 +448,7 @@ class EvaluationAgent:
             bnpb_attribution=bnpb_attribution,
             risk_state=risk_state,
             plausibility=getattr(perception, "plausibility", {}) or {},
+            elevation=elevation_data,
         )
 
     def _freshness_penalty(self, freshness_minutes: float) -> float:
@@ -434,6 +481,10 @@ class EvaluationAgent:
     ) -> str:
         """
         Determine system status using both confidence score and composite trust breakdown.
+
+        This method is a backward-compatible provisional status calculation.
+        The canonical decision runtime in app.domain.decision is the final
+        source of truth for system_status when available.
 
         Priority order:
           1. CONFLICT — signal conflict + baseline alert (two mechanisms disagree)

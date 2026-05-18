@@ -26,3 +26,16 @@ def test_detect_out_of_distribution_flags_extreme_values():
 
     assert result["out_of_distribution_count"] >= 1
     assert len(result["warnings"]) >= 1
+
+
+def test_detect_out_of_distribution_ignores_year_rollover_feature():
+    result = detect_out_of_distribution(
+        {
+            "year": 2031.0,
+            "month": 4.0,
+            "avg_rainfall": 30.0,
+            "max_rainfall": 60.0,
+        }
+    )
+
+    assert all(warning["feature"] != "year" for warning in result["warnings"])

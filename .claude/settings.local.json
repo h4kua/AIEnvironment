@@ -20,7 +20,15 @@
       "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/test_flood_pipeline.py -v --tb=short)",
       "Bash(flood_env/Scripts/python.exe -c \"from app.utils.paths import DEFAULT_REALTIME_SNAPSHOT as p; print\\('path:', p\\); print\\('parent:', p.parent\\); print\\('parent exists:', p.parent.exists\\(\\)\\); print\\('parent is_dir:', p.parent.is_dir\\(\\) if p.parent.exists\\(\\) else 'N/A'\\); print\\('parent.parent exists:', p.parent.parent.exists\\(\\)\\)\")",
       "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/ tests/unit/test_realtime_native_feature_builder.py -q --tb=line)",
-      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/ tests/unit/test_realtime_native_feature_builder.py -q --tb=short)"
+      "Bash(flood_env/Scripts/python.exe -m pytest tests/test_failure_simulation.py tests/integration/ tests/unit/test_realtime_native_feature_builder.py -q --tb=short)",
+      "Bash(python -m pytest tests/test_location_normalizer.py -v --tb=short)",
+      "Bash(python -c \"import ast, json; [ast.parse\\(open\\(p, encoding='utf-8'\\).read\\(\\)\\) for p in ['app/services/bnpb_jakarta_mapper.py', 'app/agents/perception_agent.py']]; print\\('AST OK'\\); print\\('static_kec_count:', len\\(json.load\\(open\\('data/bnpb_jakarta_static.json', encoding='utf-8'\\)\\)['kecamatan']\\)\\)\")",
+      "Bash(python -m app.services.bnpb_jakarta_mapper)",
+      "Bash(python -c \"from app.api.main import SnapshotIn, _normalize_location, _DEFAULT_LOCATION, _VALID_KOTA; s = SnapshotIn\\(fetched_at_utc='2026-05-18T11:30:00Z', location={'city': 'Jakarta'}\\); print\\('location=', repr\\(s.location\\), 'location_raw=', repr\\(s.location_raw\\)\\); s2 = SnapshotIn\\(fetched_at_utc='x', location={'district': 'Menteng'}\\); print\\('district→', s2.location, '/raw=', s2.location_raw\\); s3 = SnapshotIn\\(fetched_at_utc='x'\\); print\\('none→', s3.location, '/raw=', s3.location_raw\\); s4 = SnapshotIn\\(fetched_at_utc='x', location='jakarta selatan'\\); print\\('str→', s4.location, '/raw=', s4.location_raw\\)\")",
+      "Bash(python -c \"from app.api.main import SnapshotIn; s = SnapshotIn\\(fetched_at_utc='x', location={'city': 'Jakarta'}\\); print\\('city-Jakarta:', s.location, '|', s.location_raw\\); s2 = SnapshotIn\\(fetched_at_utc='x', location={'district': 'Menteng'}\\); print\\('district-Menteng:', s2.location, '|', s2.location_raw\\); s3 = SnapshotIn\\(fetched_at_utc='x'\\); print\\('none:', s3.location, '|', s3.location_raw\\); s4 = SnapshotIn\\(fetched_at_utc='x', location='jakarta selatan'\\); print\\('str-lower:', s4.location, '|', s4.location_raw\\); s5 = SnapshotIn\\(fetched_at_utc='x', location='Jakarta'\\); print\\('bare-Jakarta:', s5.location, '|', s5.location_raw\\); s6 = SnapshotIn\\(fetched_at_utc='x', location={'city': 'jakarta utara'}\\); print\\('city-lower:', s6.location, '|', s6.location_raw\\)\")",
+      "Bash(python -m pytest tests/test_location_normalizer.py --tb=short -q)",
+      "Bash(python -m pytest tests/integration/test_flood_pipeline.py::test_pipeline_returns_required_keys -x --tb=long)",
+      "Bash(python -c 'from app.api.main import app; print\\('\\\\''app import OK'\\\\''\\); from fastapi.testclient import TestClient *)"
     ]
   }
 }

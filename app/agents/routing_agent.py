@@ -15,6 +15,8 @@ by _TMA_DEGRADED_PENALTY but never block routing.
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import TYPE_CHECKING
 
 from app.services.data_ingestion.tma_scraper import fetch_tma_data
@@ -24,8 +26,22 @@ from app.services.routing.route_planner import compute_route_safety, get_routes,
 if TYPE_CHECKING:
     from app.agents.evaluation_agent import EvaluationResult
 
+_log = logging.getLogger(__name__)
+
 _AUTO_ROUTING_LEVELS = {"WARNING", "DANGER"}
 _TMA_DEGRADED_PENALTY = 0.05
+
+
+def _tma_stale_grace_minutes() -> float:
+    """
+    Cached-but-still-fresh window. STALE responses inside this window do NOT
+    incur a confidence penalty — the data is acknowledged old but operationally
+    equivalent to fresh for the prediction horizon we publish.
+    """
+    try:
+        return float(os.getenv("TMA_STALE_GRACE_MINUTES", "30"))
+    except (TypeError, ValueError):
+        return 30.0
 
 # System trust modifier for multi-objective route scoring (Task 4).
 # Reduces effective safety scores when the flood zone map is itself uncertain
@@ -47,11 +63,20 @@ class RoutingAgent:
     the safest available route given current flood conditions.
     """
 
+    def __init__(self) -> None:
+        # Per-instance TMA last-valid cache (replaces former module-global in
+        # tma_scraper). The orchestrator owns one RoutingAgent per
+        # FloodDecisionPipeline instance, so this is request-scoped enough for
+        # the demo target and eliminates the cross-request shared state.
+        self._tma_cache_state: dict = {}
+
     def run(
         self,
         evaluation: "EvaluationResult",
         origin: str | None,
         destination: str | None,
+        *,
+        now: "datetime | None" = None,
     ) -> dict:
         """
         Execute routing stage.
@@ -101,7 +126,7 @@ class RoutingAgent:
             else _SYSTEM_TRUST_MODIFIER.get(system_status, 1.00)
         )
 
-        tma_result = fetch_tma_data()
+        tma_result = fetch_tma_data(now=now, cache_state=self._tma_cache_state)
         tma_failure = self._tma_failure_record(tma_result)
         confidence_adjustment = -_TMA_DEGRADED_PENALTY if tma_failure else 0.0
         has_coords = bool(origin and destination)
@@ -173,21 +198,75 @@ class RoutingAgent:
         }
 
     def _tma_failure_record(self, tma_result: dict) -> dict | None:
-        status = tma_result.get("status", "OK")
-        if status not in ("DEGRADED", "INVALID"):
+        """
+        Build a failure record for the TMA fetch result.
+
+        Status → action matrix:
+
+          OK        → None (no failure).
+          STALE     → if cached + age < TMA_STALE_GRACE_MINUTES → None
+                      (cache is recent enough that the prediction horizon is
+                      unaffected; no confidence penalty applied).
+                    → otherwise → "medium" severity, normal penalty.
+          DEGRADED  → "medium" severity, normal penalty (transport failure).
+          INVALID   → "high" severity, normal penalty (corrupt data).
+
+        Other status strings default to None (safe).
+        """
+        status = (tma_result.get("status") or "OK").upper()
+
+        if status == "OK":
             return None
+
+        if status == "STALE":
+            stale_age = tma_result.get("stale_age_minutes")
+            grace = _tma_stale_grace_minutes()
+            try:
+                stale_age_float = float(stale_age) if stale_age is not None else None
+            except (TypeError, ValueError):
+                stale_age_float = None
+            if (
+                tma_result.get("source") == "cache"
+                and stale_age_float is not None
+                and stale_age_float < grace
+            ):
+                _log.info(
+                    "tma_scraper: STALE cache age=%.1f min < grace=%.1f min — "
+                    "suppressing external_source_unreliable failure.",
+                    stale_age_float,
+                    grace,
+                )
+                return None
+            severity = "medium"
+            message = (
+                "TMA scraping proxy returned STALE data — using cached or empty fallback; "
+                "real-time water-level signals are unverified."
+            )
+        elif status == "DEGRADED":
+            severity = "medium"
+            message = (
+                "TMA scraping proxy is degraded (transport failure) — real-time water-level "
+                "data cannot be independently verified. Hydrology signals have reduced confidence."
+            )
+        elif status == "INVALID":
+            severity = "high"
+            message = (
+                "TMA scraping proxy returned structurally invalid data — "
+                "data discarded. Hydrology signals have reduced confidence."
+            )
+        else:
+            return None
+
         return {
             "type": "external_source_unreliable",
-            "severity": "medium" if status == "DEGRADED" else "high",
-            "message": (
-                f"TMA scraping proxy is {status.lower()} — real-time water-level data "
-                "cannot be independently verified. Hydrology signals have reduced confidence."
-            ),
+            "severity": severity,
+            "message": message,
             "detail": {
                 "source": tma_result.get("source", "unknown"),
                 "reason": tma_result.get("reason", ""),
                 "reliability": tma_result.get("reliability", "low"),
                 "tma_status": status,
+                "stale_age_minutes": tma_result.get("stale_age_minutes"),
             },
             "confidence_penalty": _TMA_DEGRADED_PENALTY,
         }

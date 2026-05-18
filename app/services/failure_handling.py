@@ -14,6 +14,11 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from app.services.plausibility_check import plausibility_failure_record
+from app.services.constants import (
+    BMKG_CERTAINTY_WEIGHTS,
+    BMKG_SEVERITY_WEIGHTS,
+    BMKG_URGENCY_WEIGHTS,
+)
 
 # Data older than 30 minutes is stale for Jakarta flood operations.
 # Flood events in Jakarta's low-lying areas develop within 20–30 minutes
@@ -37,13 +42,81 @@ WATER_DELTA_ANOMALOUS = 0.15
 MODEL_BASELINE_GAP_CONFLICT = 0.30
 
 
-def snapshot_missing_or_stale(snapshot: dict) -> list[dict]:
+def _safe_float(value: object, default: float = 0.0) -> float:
+    try:
+        if value in ("", None):
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _raw_bmkg_weighted_score(snapshot: dict) -> float:
+    weighted_total = 0.0
+    for alert in snapshot.get("bmkg_alerts") or []:
+        severity = BMKG_SEVERITY_WEIGHTS.get((alert.get("severity") or "").lower(), 0.4)
+        certainty = BMKG_CERTAINTY_WEIGHTS.get((alert.get("certainty") or "").lower(), 0.4)
+        urgency = BMKG_URGENCY_WEIGHTS.get((alert.get("urgency") or "").lower(), 0.5)
+        weighted_total += severity * certainty * urgency
+    return min(weighted_total, 1.0)
+
+
+def _fallback_conflict_features(snapshot: dict, features: dict) -> dict:
+    openweather = snapshot.get("openweather") or {}
+    rain = openweather.get("rain") or {}
+    poskobanjir = snapshot.get("poskobanjir") or []
+
+    rainfall_mm = _safe_float(features.get("rainfall_mm"))
+    if rainfall_mm <= 0.0:
+        rainfall_mm = max(
+            _safe_float(rain.get("1h")),
+            _safe_float(rain.get("3h")) / 3.0,
+        )
+
+    rainfall_roll3_mean = _safe_float(features.get("rainfall_roll3_mean"))
+    if rainfall_roll3_mean <= 0.0:
+        rainfall_roll3_mean = rainfall_mm
+
+    bmkg_weighted_score = _safe_float(features.get("bmkg_weighted_score"))
+    if bmkg_weighted_score <= 0.0:
+        bmkg_weighted_score = _raw_bmkg_weighted_score(snapshot)
+
+    water_level_ratio = _safe_float(features.get("water_level_ratio"))
+    if water_level_ratio <= 0.0:
+        ratios: list[float] = []
+        for record in poskobanjir:
+            current = _safe_float(record.get("tinggi_air"))
+            thresholds = [
+                _safe_float(record.get("siaga1")),
+                _safe_float(record.get("siaga2")),
+                _safe_float(record.get("siaga3")),
+                _safe_float(record.get("siaga4")),
+            ]
+            thresholds = [threshold for threshold in thresholds if threshold > 0.0]
+            if thresholds:
+                ratios.append(current / max(thresholds))
+        water_level_ratio = max(ratios, default=0.0)
+
+    return {
+        **features,
+        "rainfall_mm": rainfall_mm,
+        "rainfall_roll3_mean": rainfall_roll3_mean,
+        "bmkg_weighted_score": bmkg_weighted_score,
+        "water_level_ratio": water_level_ratio,
+    }
+
+
+def snapshot_missing_or_stale(snapshot: dict, *, now: "datetime | None" = None) -> list[dict]:
     """
     Check snapshot timestamp and required section completeness.
+
+    ``now`` (optional) pins the reference clock used for staleness comparison
+    so identical replays produce identical failure_modes.
 
     Returns a list of failure dicts — empty list if everything is healthy.
     """
     failures: list[dict] = []
+    ref_now = now if now is not None else datetime.now(timezone.utc)
 
     # ── Timestamp / freshness ────────────────────────────────────────────────
     fetched_at = snapshot.get("fetched_at_utc")
@@ -64,7 +137,7 @@ def snapshot_missing_or_stale(snapshot: dict) -> list[dict]:
     else:
         try:
             snapshot_dt = datetime.fromisoformat(fetched_at.replace("Z", "+00:00"))
-            age_minutes = (datetime.now(timezone.utc) - snapshot_dt).total_seconds() / 60.0
+            age_minutes = (ref_now - snapshot_dt).total_seconds() / 60.0
             if age_minutes > DATA_STALENESS_THRESHOLD_MINUTES:
                 # Penalty scales linearly up to 0.20 at 150 minutes, then caps.
                 penalty = round(min(0.20, age_minutes / 150.0), 4)
@@ -290,15 +363,20 @@ def detect_failures(
     baseline_result: dict,
     ood_detection: dict,
     plausibility: dict | None = None,
+    *,
+    now: "datetime | None" = None,
 ) -> list[dict]:
     """
     Master failure detection — aggregates all failure types into one list.
 
     Each record includes a `confidence_penalty` for downstream confidence adjustment
     and a `risk_escalation` flag that can override the model's risk_level.
+
+    ``now`` (optional) is threaded into time-comparison checks so identical
+    replays produce identical failure_modes.
     """
     failures: list[dict] = []
-    failures.extend(snapshot_missing_or_stale(snapshot))
+    failures.extend(snapshot_missing_or_stale(snapshot, now=now))
     plausibility_failure = (
         plausibility_failure_record(plausibility)
         if isinstance(plausibility, dict)
@@ -306,7 +384,14 @@ def detect_failures(
     )
     if plausibility_failure is not None:
         failures.append(plausibility_failure)
-    failures.extend(conflicting_signals(features, diagnostics, model_prob, baseline_result))
+    failures.extend(
+        conflicting_signals(
+            _fallback_conflict_features(snapshot, features),
+            diagnostics,
+            model_prob,
+            baseline_result,
+        )
+    )
     failures.extend(detect_ood_failures(ood_detection))
     return failures
 

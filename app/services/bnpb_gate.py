@@ -15,7 +15,13 @@ Design contract (enforced here, not in calling agents):
   - build_*_trace() helpers produce deterministic audit strings.
 
 Status codes and their semantics:
-  ACTIVE           — gate open; all BNPB influence permitted
+  ACTIVE           — gate open; live InaRISK API data drives the IRBI value.
+  STATIC_FALLBACK  — gate open; bundled static JSON drives the IRBI value
+                     (live API unreachable). Operationally equivalent to
+                     ACTIVE for routing / threshold purposes; flagged so
+                     operators can tell it is bundled-curated, not live.
+  DEFAULT          — gate open; district mapped to Jakarta but no record
+                     in either source — mid-band IRBI=0.5 stamped.
   NOT_APPLICABLE   — location outside Jakarta or mapping confidence < 0.70
   STALE            — IRBI survey data older than 365 days
   CONFLICT_BLOCKED — system_status == "CONFLICT"; adding IRBI would compound contradiction
@@ -35,12 +41,17 @@ if TYPE_CHECKING:
 _MAX_VINTAGE_DAYS = 365
 
 # Allowed canonical Jakarta kota — any other district is out of scope.
+# Includes Kepulauan Seribu (6th DKI Jakarta administrative unit, BPS code
+# 3101) so the static fallback record published in
+# ``app/data/bnpb_jakarta_fallback.json`` opens the gate when the API
+# input maps cleanly to it.
 _VALID_DISTRICTS: frozenset[str] = frozenset({
     "Jakarta Pusat",
     "Jakarta Utara",
     "Jakarta Barat",
     "Jakarta Selatan",
     "Jakarta Timur",
+    "Kepulauan Seribu",
 })
 
 # IRBI contribution to effective_trust suppression.
@@ -145,14 +156,27 @@ def evaluate_bnpb_status(
         }
 
     # ── Gate open ─────────────────────────────────────────────────────────────
+    # Status code reflects the data lineage so operators and downstream
+    # automation can tell whether the IRBI value rode on live API data
+    # (ACTIVE), bundled static fallback (STATIC_FALLBACK), or a synthetic
+    # mid-band default for a mapped-but-unknown district (DEFAULT).
     irbi = vuln_context.effective_irbi_score
+    source = getattr(vuln_context, "data_source", "api")
+    code_by_source = {
+        "api":             "ACTIVE",
+        "static_fallback": "STATIC_FALLBACK",
+        "default":         "DEFAULT",
+    }
+    code = code_by_source.get(source, "ACTIVE")
+    tag = f"[BNPB-{code}]"
     return {
         "active": True,
-        "code":   "ACTIVE",
+        "code":   code,
         "reason": (
-            f"[BNPB-ACTIVE] district={vuln_context.district}, "
+            f"{tag} district={vuln_context.district}, "
             f"IRBI={irbi:.2f}, exposure={vuln_context.exposure_class}, "
-            f"vintage={vuln_context.data_vintage_days}d"
+            f"vintage={vuln_context.data_vintage_days}d, "
+            f"data_source={source}"
         ),
         "inputs": inputs,
     }

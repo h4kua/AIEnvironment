@@ -130,8 +130,13 @@ def validate_decision_meta(
         raise OutputContractError(
             "Inv-5: decision_reason=INVALID_INPUT but ml_execution_mode != SHADOW_ONLY"
         )
-    # Inv-6: INVALID_INPUT ⇒ risk_level=WARNING
-    if decision_reason == DECISION_REASON_INVALID_INPUT and risk_level != RISK_LEVEL_WARNING:
+    # Inv-6: INVALID_INPUT ⇒ canonical invalid-input risk placeholder.
+    # The authoritative runtime now surfaces UNKNOWN; WARNING is still accepted
+    # for backward compatibility with older fallback payloads.
+    if (
+        decision_reason == DECISION_REASON_INVALID_INPUT
+        and risk_level not in {RISK_LEVEL_UNKNOWN, RISK_LEVEL_WARNING}
+    ):
         raise OutputContractError(
             f"Inv-6: decision_reason=INVALID_INPUT but risk_level={risk_level!r}"
         )
@@ -240,6 +245,7 @@ def safe_fallback_output(
     *,
     error_type: str = "OutputContractError",
     original_result: dict[str, Any] | None = None,
+    now: "datetime | None" = None,
 ) -> dict[str, Any]:
     """
     A minimal, contractually-valid pipeline output used when validation fails.
@@ -332,7 +338,7 @@ def safe_fallback_output(
         "data_freshness_minutes": -1.0,
         "signals": {},
         "diagnostics": {},
-        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "timestamp_utc": (now if now is not None else datetime.now(timezone.utc)).isoformat(),
         "pipeline_version": "agentic-v2.0",
         "model_name": "unknown",
     }

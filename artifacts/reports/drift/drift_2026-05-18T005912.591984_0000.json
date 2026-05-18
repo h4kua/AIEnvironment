@@ -1,0 +1,36 @@
+{
+  "generated_at": "2026-05-18T00:59:12.591984+00:00",
+  "p_threshold": 0.05,
+  "min_drift_features": 2,
+  "recent_window_rows": 200,
+  "baseline_rows": 2000,
+  "features_evaluated": [
+    "rainfall_mm",
+    "water_level_ratio"
+  ],
+  "features": [
+    {
+      "feature": "rainfall_mm",
+      "ks_statistic": 0.9145,
+      "p_value": 0.0,
+      "recent_n": 200,
+      "baseline_n": 2000,
+      "recent_mean": 7.7365,
+      "baseline_mean": 55.959494,
+      "drifted": true
+    },
+    {
+      "feature": "water_level_ratio",
+      "ks_statistic": 0.391,
+      "p_value": 0.0,
+      "recent_n": 200,
+      "baseline_n": 2000,
+      "recent_mean": 0.401658,
+      "baseline_mean": 0.442627,
+      "drifted": true
+    }
+  ],
+  "drift_count": 2,
+  "retrain_recommended": true,
+  "retrain_reason": "2 features drifted (p<0.05): rainfall_mm, water_level_ratio"
+}

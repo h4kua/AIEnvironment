@@ -47,17 +47,21 @@ def main() -> None:
         confidence_score=0.88,
         model_variant="xgboost-v2026.04",
     )
+    # Canonical vocabulary values (see app/contracts/vocabulary.py).
+    # "READY" was a legacy alias that normalized to OK; "RISK_THRESHOLD" was
+    # never in the canonical DecisionReason enum and would fail the
+    # decisions_reason_chk DB CHECK constraint installed by migration 100.
     evaluation = EvaluationPayload(
-        system_status="READY",
+        system_status="OK",
         risk_level="DANGER",
         probability=0.82,
         confidence_score=0.88,
         requires_manual_review=False,
     )
     decision = DecisionPayload(
-        system_status="READY",
+        system_status="OK",
         requires_manual_review=False,
-        decision_reason="RISK_THRESHOLD",
+        decision_reason="RISK",
         data_validity="VALID",
         ml_execution_mode="FULL",
         risk_level="DANGER",

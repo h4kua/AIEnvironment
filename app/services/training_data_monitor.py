@@ -7,6 +7,7 @@ from app.utils.paths import PROCESSED_DATA_DIR
 
 
 TRAINING_DATA_PATH = PROCESSED_DATA_DIR / "cleaned_flood_data_jakarta.csv"
+OOD_EXCLUDED_FEATURES = {"year"}
 
 
 @lru_cache(maxsize=1)
@@ -37,6 +38,8 @@ def detect_out_of_distribution(feature_values):
     in_distribution_count = 0
 
     for feature_name, value in feature_values.items():
+        if feature_name in OOD_EXCLUDED_FEATURES:
+            continue
         feature_stats = stats.get(feature_name)
         if feature_stats is None:
             continue

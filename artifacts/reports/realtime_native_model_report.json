@@ -1,26 +1,90 @@
 {
-  "dataset_path": "D:\\Buat Lomba\\data\\processed\\realtime_native_training_bootstrap.csv",
+  "dataset_path": "D:\\Buat Lomba\\data\\processed\\realtime_native_training_incremental_20260518T000000Z.csv",
   "feature_count": 16,
-  "training_rows": 2342,
-  "test_rows": 586,
-  "performance": {
-    "train_accuracy": 0.9666951323654995,
-    "test_accuracy": 0.9215017064846417,
-    "test_precision": 0.6923076923076923,
-    "test_recall": 0.32142857142857145,
-    "test_f1": 0.43902439024390244,
-    "test_roc_auc": 0.9285714285714286
+  "training_rows": 2946,
+  "validation_rows": 521,
+  "test_rows": 867,
+  "split_strategy": "chronological_80_15_5",
+  "class_balance": {
+    "train_neg": 2657,
+    "train_pos": 289,
+    "scale_pos_weight": 9.193771626297577
   },
+  "performance": {
+    "optimal_threshold": 0.13496493901452683,
+    "train_accuracy": 0.8818737270875764,
+    "test_accuracy": 1.0,
+    "test_precision": 1.0,
+    "test_recall": 1.0,
+    "test_f1": 1.0,
+    "test_roc_auc": 1.0,
+    "validation_recall_at_threshold": 1.0,
+    "validation_precision_at_threshold": 0.9254901960784314
+  },
+  "calibration": {
+    "method": "sigmoid_fallback",
+    "test_brier": 0.3433927614288451,
+    "test_ece": 0.11178174561155738
+  },
+  "confusion_matrix": {
+    "labels": [
+      0,
+      1
+    ],
+    "matrix": [
+      [
+        450,
+        0
+      ],
+      [
+        0,
+        417
+      ]
+    ]
+  },
+  "threshold_sweep_top5": [
+    {
+      "threshold": 0.135,
+      "precision": 0.9255,
+      "recall": 1.0,
+      "f2": 0.9842
+    },
+    {
+      "threshold": 0.1343,
+      "precision": 0.8839,
+      "recall": 1.0,
+      "f2": 0.9744
+    },
+    {
+      "threshold": 0.131,
+      "precision": 0.8489,
+      "recall": 1.0,
+      "f2": 0.9656
+    },
+    {
+      "threshold": 0.1282,
+      "precision": 0.8369,
+      "recall": 1.0,
+      "f2": 0.9625
+    },
+    {
+      "threshold": 0.126,
+      "precision": 0.7195,
+      "recall": 1.0,
+      "f2": 0.9277
+    }
+  ],
   "scientific_notes": {
     "training_mode": "bootstrap_proxy_until_realtime_history_available",
     "limitations": [
       "Humidity, BMKG alert, dan water level historis belum tersedia observasional penuh.",
-      "Sebagian feature bootstrap masih diproksikan dari histori hujan Jakarta."
+      "Sebagian feature bootstrap masih diproksikan dari histori hujan Jakarta.",
+      "Train cadence (monthly) berbeda dengan inference cadence (per-snapshot); metrik di sini upper-bound, recall produksi wajib diverifikasi via shadow-mode."
     ],
     "strengths": [
-      "Feature set kini 100% kompatibel dengan inference realtime.",
-      "Temporal lag dan rolling rainfall menambah konteks dinamika banjir.",
-      "Isolation Forest dipakai untuk OOD yang lebih robust."
+      "Chronological split + scale_pos_weight + isotonic calibration menargetkan recall >= 0.80.",
+      "Threshold dipersist di optimal_threshold_realtime_native.json dan dibaca oleh inference.",
+      "Brier + ECE diukur; auto-fallback ke sigmoid bila isotonic ECE > 0.10."
     ]
   }
 }

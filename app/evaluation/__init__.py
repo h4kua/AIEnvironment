@@ -1,33 +1,21 @@
 """
-Evaluation Module — Adversarial Testing Framework
+Evaluation Module — scenario harness + classification metrics.
+
+Phase 7 cleanup: the adversarial-testing framework was quarantined to
+``_deprecated/evaluation__adversarial_framework.py`` because its trace markers
+(``[L0-DATA] -> [L1-PHYSICAL] -> ...``) and parallel ``RISK_TIER`` vocabulary
+diverged from canonical ``app.contracts.vocabulary`` and the
+``Decision.decision_trace`` shape produced by ``app.domain.decide``. Anyone
+who needs adversarial robustness evaluation should rebuild it on top of
+canonical vocabulary; the legacy implementation is preserved on disk for
+reference but produces misleading numbers and MUST NOT be reused as-is.
 
 Exports:
-- AdversarialEvaluator: Main evaluator for adversarial testing
-- ScenarioComposer: Adversarial combination engine
-- ExpectedOutcome: Enhanced expected outcome with ground truth awareness
-- ExpectedSource: Source of ground truth expectation
-- UncertaintyType: Types of input uncertainty signals
-- TraceFailureType: Types of trace validation failures
-- run_adversarial_evaluation: Convenience function
-- generate_robustness_report: Report generator
+  - SCENARIO_LABELS, ScenarioLabel: scenario reference labels
+  - compute_classification_metrics, aggregate_evaluation_report: metrics
+  - run_scenarios: scenario harness entry point
 """
 
-from app.evaluation.adversarial_framework import (
-    AdversarialEvaluator,
-    ScenarioComposer,
-    ExpectedOutcome,
-    ExpectedSource,
-    UncertaintyType,
-    TraceFailureType,
-    AdversarialScenario,
-    ScenarioResult,
-    TraceValidation,
-    UncertaintySignal,
-    run_adversarial_evaluation,
-    generate_robustness_report,
-)
-
-# Also export existing components for backward compatibility
 from app.evaluation.metrics import (
     SCENARIO_LABELS,
     ScenarioLabel,
@@ -38,20 +26,6 @@ from app.evaluation.metrics import (
 from app.evaluation.scenario_runner import run_scenarios
 
 __all__ = [
-    # New adversarial framework
-    "AdversarialEvaluator",
-    "ScenarioComposer",
-    "ExpectedOutcome",
-    "ExpectedSource",
-    "UncertaintyType",
-    "TraceFailureType",
-    "AdversarialScenario",
-    "ScenarioResult",
-    "TraceValidation",
-    "UncertaintySignal",
-    "run_adversarial_evaluation",
-    "generate_robustness_report",
-    # Existing components
     "SCENARIO_LABELS",
     "ScenarioLabel",
     "compute_classification_metrics",

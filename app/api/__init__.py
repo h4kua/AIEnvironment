@@ -1,3 +1,3 @@
-from .main import app
+"""FastAPI package for the Jakarta Flood Prediction API."""
 
-__all__ = ["app"]
+__all__: list[str] = []

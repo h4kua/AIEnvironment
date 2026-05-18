@@ -14,14 +14,12 @@ EvaluationAgent can reconcile them with explicit trust accounting.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import TYPE_CHECKING, Any
 
-import joblib
 import numpy as np
 
+from app.realtime_native.bundle import load_runtime_bundle
 from app.realtime_native.feature_builder import (
     REALTIME_NATIVE_FEATURES,
     build_realtime_native_features_from_snapshot,
@@ -35,24 +33,9 @@ from app.services.decision_logic import (
     generate_risk_interpretation,
 )
 from app.services.failure_handling import detect_failures
-from app.utils.paths import MODELS_DIR
 
 if TYPE_CHECKING:
     from app.agents.perception_agent import PerceptionResult
-
-
-# ─── Model asset loading ──────────────────────────────────────────────────────
-
-
-@lru_cache(maxsize=1)
-def _load_assets() -> tuple:
-    """Load and cache realtime-native model assets on first call."""
-    model = joblib.load(MODELS_DIR / "flood_model_realtime_native.pkl")
-    scaler = joblib.load(MODELS_DIR / "scaler_realtime_native.pkl")
-    ood_detector = joblib.load(MODELS_DIR / "ood_detector_realtime_native.pkl")
-    with open(MODELS_DIR / "model_card_realtime_native.json", encoding="utf-8") as fh:
-        model_card = json.load(fh)
-    return model, scaler, ood_detector, model_card
 
 
 def _to_native(value: Any) -> Any:
@@ -68,57 +51,101 @@ def _to_native(value: Any) -> Any:
     return value
 
 
-def _base_confidence(probability: float, ood_score: float) -> float:
+def _base_confidence(probability: float, ood_score: float, thresholds: dict) -> float:
     """
-    Compute initial model confidence before failure penalties are applied.
+    Compute initial model confidence before evaluation-stage trust adjustments.
 
-    Two components:
-      - Margin score: normalised distance from the nearest classification threshold.
-        Thresholds are 0.20 and 0.45; we normalise against 0.25 so clear
-        predictions (far from both thresholds) score near 1.0.
-      - OOD confidence: IsolationForest decision_function mapped to [0, 1].
-        Typical range [-0.5, 0.2]; we map this so score > 0 → near 1.0,
-        score < -0.5 → 0.0.
+    The margin term is anchored to the active runtime-native threshold ladder so
+    confidence and final risk operate on one canonical boundary set.
     """
-    min_dist = min(abs(probability - 0.20), abs(probability - 0.45))
-    margin_score = min(min_dist / 0.25, 1.0)
+    boundaries = [
+        float(thresholds["pre_alert"]),
+        float(thresholds["warning"]),
+        float(thresholds["danger"]),
+    ]
+    min_dist = min(abs(probability - boundary) for boundary in boundaries)
+    ladder_span = max(0.01, float(thresholds["danger"]) - float(thresholds["pre_alert"]))
+    margin_score = min(min_dist / ladder_span, 1.0)
     ood_confidence = max(0.0, min(1.0, (ood_score + 0.50) / 0.70))
     return round(margin_score * 0.60 + ood_confidence * 0.40, 4)
 
 
-def _run_model(snapshot: dict) -> dict:
+_OOD_FLOOR_DEFAULT = 0.6
+
+
+def _outlier_capped_confidence(
+    *,
+    confidence: float,
+    is_outlier: bool,
+    model_card: dict,
+) -> tuple[float, bool, float]:
+    """
+    Apply the model card's ``confidence_floor_on_outlier`` when the OOD
+    detector flagged the input. Returns ``(capped_confidence, was_capped,
+    floor)`` so the inference response can publish the lineage. Floor source
+    is the LIVE model_card at every call — never hardcoded — so a re-export
+    that updates the floor is honoured without a process restart.
+    """
+    if not is_outlier:
+        return float(confidence), False, _OOD_FLOOR_DEFAULT
+    try:
+        floor = float(model_card.get("confidence_floor_on_outlier", _OOD_FLOOR_DEFAULT))
+    except (TypeError, ValueError):
+        floor = _OOD_FLOOR_DEFAULT
+    floor = max(0.0, min(1.0, floor))
+    if confidence <= floor:
+        return float(confidence), False, floor
+    return floor, True, floor
+
+
+def _run_model(snapshot: dict, *, persist_history: bool = True, as_of=None) -> dict:
     """
     Execute the realtime-native model pipeline on a snapshot dict.
 
-    Uses persist_history=True so the temporal feature history CSV is updated
-    exactly once per pipeline invocation (flood_pipeline.py does not call this twice).
+    ``persist_history`` toggles the temporal feature history append.
+    ``as_of`` pins snapshot-history reads for deterministic replay.
     """
-    model, scaler, ood_detector, model_card = _load_assets()
+    bundle = load_runtime_bundle()
 
-    engineered = build_realtime_native_features_from_snapshot(snapshot, persist_history=True)
+    engineered = build_realtime_native_features_from_snapshot(
+        snapshot, persist_history=persist_history, as_of=as_of,
+    )
     features_df = engineered.frame[REALTIME_NATIVE_FEATURES]
-    scaled = scaler.transform(features_df)
+    scaled = bundle.scaler.transform(features_df)
 
-    probability = float(model.predict_proba(scaled)[0, 1])
-    ood_score = float(ood_detector.decision_function(scaled)[0])
-    ood_is_outlier = bool(ood_detector.predict(scaled)[0] == -1)
+    probability = float(bundle.model.predict_proba(scaled)[0, 1])
+    ood_score = float(bundle.ood_detector.decision_function(scaled)[0])
+    ood_is_outlier = bool(bundle.ood_detector.predict(scaled)[0] == -1)
+
+    raw_confidence = _base_confidence(probability, ood_score, bundle.thresholds)
+    capped_confidence, was_capped, floor = _outlier_capped_confidence(
+        confidence=raw_confidence,
+        is_outlier=ood_is_outlier,
+        model_card=bundle.model_card,
+    )
 
     return {
         "model_variant": "realtime_native",
         "probability": round(probability, 4),
-        "confidence_score": _base_confidence(probability, ood_score),
+        "confidence_score": round(capped_confidence, 4),
         "ood_detection": {
             "method": "IsolationForest",
             "score": round(ood_score, 4),
             "is_outlier": ood_is_outlier,
+            # Audit trail: operators can see whether the published
+            # confidence_score was the raw model output or capped by the
+            # OOD floor, and which floor value was in effect at the time.
+            "raw_confidence": round(raw_confidence, 4),
+            "confidence_capped_by_ood_floor": was_capped,
+            "confidence_floor_on_outlier": round(floor, 4),
         },
         "features": _to_native(features_df.iloc[0].to_dict()),
         "diagnostics": _to_native(engineered.diagnostics),
-        "model_name": model_card.get("model_name", "XGBoost Flood Predictor - Realtime Native"),
+        "model_name": bundle.model_card.get(
+            "model_name",
+            "XGBoost Flood Predictor - Realtime Native",
+        ),
     }
-
-
-# ─── ReasoningResult ──────────────────────────────────────────────────────────
 
 
 @dataclass
@@ -136,9 +163,6 @@ class ReasoningResult:
     baseline_result: dict
 
 
-# ─── ReasoningAgent ───────────────────────────────────────────────────────────
-
-
 class ReasoningAgent:
     """
     Stage 2: Reasoning.
@@ -150,18 +174,23 @@ class ReasoningAgent:
       4. Multi-condition signal extraction and expert narrative generation
     """
 
-    def run(self, perception: "PerceptionResult") -> ReasoningResult:
-        # Step 1: ML model — features + OOD detection + probability
-        prediction = _run_model(perception.snapshot)
+    def run(
+        self,
+        perception: "PerceptionResult",
+        *,
+        persist_history: bool = True,
+        as_of=None,
+    ) -> ReasoningResult:
+        prediction = _run_model(
+            perception.snapshot, persist_history=persist_history, as_of=as_of,
+        )
         features = prediction["features"]
         diagnostics = prediction["diagnostics"]
         model_prob = prediction["probability"]
         ood_detection = prediction["ood_detection"]
 
-        # Step 2: Rule-based baseline (independent of model output)
         baseline_result = compare_with_baseline(model_prob, features)
 
-        # Step 3: Failure detection across all failure categories
         failure_modes = detect_failures(
             snapshot=perception.snapshot,
             features=features,
@@ -170,32 +199,29 @@ class ReasoningAgent:
             baseline_result=baseline_result,
             ood_detection=ood_detection,
             plausibility=getattr(perception, "plausibility", None),
+            now=as_of,
         )
 
-        # Step 4: Adaptive threshold classification (replaces static _classify)
         trend_state: dict = diagnostics.get("trend_state") or {}
-        # Direct attribute access — no optimistic 1.0 default.
-        # If PerceptionAgent never set plausibility_score, this raises AttributeError,
-        # which the pipeline catches as PIPELINE_FAILURE rather than silently treating
-        # unvalidated data as fully trustworthy.
         plausibility_score: float = perception.plausibility_score
-        adaptive_cls = AdaptiveThresholder().classify(
-            probability=model_prob,
+        adaptive_thresholds = AdaptiveThresholder().build_thresholds(
             failure_modes=failure_modes,
             trend_state=trend_state,
             plausibility_score=plausibility_score,
         )
-        prediction["risk_level"] = adaptive_cls.risk_level
-        prediction["adaptive_classification"] = adaptive_cls.to_dict()
+        prediction["adaptive_classification"] = adaptive_thresholds.to_dict()
 
-        # Step 5: Signal extraction with plausibility gate.
-        # Sensor-derived signals (rainfall, water level) are suppressed when
-        # plausibility is low so RoutingAgent never builds flood zones from OOD data.
         signals = extract_signals(features, plausibility_score=plausibility_score)
         driver = dominant_risk_driver(features, plausibility_score=plausibility_score)
         signals["dominant_driver"] = driver
 
-        context_summary = build_context_summary(features, diagnostics, prediction, baseline_result, plausibility_score=plausibility_score)
+        context_summary = build_context_summary(
+            features,
+            diagnostics,
+            prediction,
+            baseline_result,
+            plausibility_score=plausibility_score,
+        )
         risk_interpretation = generate_risk_interpretation(signals, failure_modes)
 
         return ReasoningResult(

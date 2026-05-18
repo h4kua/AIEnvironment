@@ -27,33 +27,34 @@ from __future__ import annotations
 
 from typing import Final, FrozenSet
 
-# ─── risk_level ───────────────────────────────────────────────────────────────
-RISK_LEVEL_SAFE:    Final[str] = "SAFE"
-RISK_LEVEL_WARNING: Final[str] = "WARNING"
-RISK_LEVEL_DANGER:  Final[str] = "DANGER"
-RISK_LEVEL_UNKNOWN: Final[str] = "UNKNOWN"
+# Phase 6: derive the legacy frozensets from the canonical vocabulary so a
+# future addition to app/contracts/vocabulary.py auto-propagates here without
+# manual edit. Scalar string constants below are kept inline for back-compat
+# with consumers that import them by name (e.g. RISK_LEVEL_DANGER).
+from app.contracts.vocabulary import (
+    DecisionReason as _CanonicalDecisionReason,
+    RiskLevel as _CanonicalRiskLevel,
+    SystemStatus as _CanonicalSystemStatus,
+)
 
-RISK_LEVELS: Final[FrozenSet[str]] = frozenset({
-    RISK_LEVEL_SAFE,
-    RISK_LEVEL_WARNING,
-    RISK_LEVEL_DANGER,
-    RISK_LEVEL_UNKNOWN,
-})
+# ─── risk_level ───────────────────────────────────────────────────────────────
+RISK_LEVEL_SAFE:      Final[str] = "SAFE"
+RISK_LEVEL_PRE_ALERT: Final[str] = "PRE_ALERT"
+RISK_LEVEL_WARNING:   Final[str] = "WARNING"
+RISK_LEVEL_DANGER:    Final[str] = "DANGER"
+RISK_LEVEL_UNKNOWN:   Final[str] = "UNKNOWN"
+
+RISK_LEVELS: Final[FrozenSet[str]] = frozenset(r.value for r in _CanonicalRiskLevel)
 
 # ─── system_status ────────────────────────────────────────────────────────────
 SYSTEM_STATUS_OK:               Final[str] = "OK"
 SYSTEM_STATUS_DEGRADED:         Final[str] = "DEGRADED"
-SYSTEM_STATUS_CONFLICT:         Final[str] = "CONFLICT"
 SYSTEM_STATUS_LOW_TRUST:        Final[str] = "LOW_TRUST"
+SYSTEM_STATUS_CONFLICT:         Final[str] = "CONFLICT"
+SYSTEM_STATUS_FAIL:             Final[str] = "FAIL"
 SYSTEM_STATUS_PIPELINE_FAILURE: Final[str] = "PIPELINE_FAILURE"
 
-SYSTEM_STATUSES: Final[FrozenSet[str]] = frozenset({
-    SYSTEM_STATUS_OK,
-    SYSTEM_STATUS_DEGRADED,
-    SYSTEM_STATUS_CONFLICT,
-    SYSTEM_STATUS_LOW_TRUST,
-    SYSTEM_STATUS_PIPELINE_FAILURE,
-})
+SYSTEM_STATUSES: Final[FrozenSet[str]] = frozenset(s.value for s in _CanonicalSystemStatus)
 
 # Subset: statuses under which automation is permitted.
 # CONFLICT and LOW_TRUST cause guardrail attenuation; PIPELINE_FAILURE bypasses
@@ -64,15 +65,19 @@ SYSTEM_STATUSES_AUTOMATION_ELIGIBLE: Final[FrozenSet[str]] = frozenset({
 })
 
 # ─── decision_reason ──────────────────────────────────────────────────────────
-DECISION_REASON_RISK:          Final[str] = "RISK"
-DECISION_REASON_INVALID_INPUT: Final[str] = "INVALID_INPUT"
-DECISION_REASON_FALLBACK:      Final[str] = "FALLBACK"
+# Scalar constants kept inline for back-compat (consumers do
+# `from app.core.enums import DECISION_REASON_FALLBACK`). The frozenset is
+# derived from canonical so it auto-tracks future additions.
+DECISION_REASON_RISK:            Final[str] = "RISK"
+DECISION_REASON_INVALID_INPUT:   Final[str] = "INVALID_INPUT"
+DECISION_REASON_FALLBACK:        Final[str] = "FALLBACK"
+DECISION_REASON_PHYSICAL_GATE:   Final[str] = "PHYSICAL_GATE"
+DECISION_REASON_MULTI_SIGNAL:    Final[str] = "MULTI_SIGNAL"
+DECISION_REASON_TREND_EXTENSION: Final[str] = "TREND_EXTENSION"
 
-DECISION_REASONS: Final[FrozenSet[str]] = frozenset({
-    DECISION_REASON_RISK,
-    DECISION_REASON_INVALID_INPUT,
-    DECISION_REASON_FALLBACK,
-})
+DECISION_REASONS: Final[FrozenSet[str]] = frozenset(
+    r.value for r in _CanonicalDecisionReason
+)
 
 # ─── data_validity ────────────────────────────────────────────────────────────
 DATA_VALIDITY_VALID:   Final[str] = "VALID"
@@ -100,6 +105,7 @@ DECISION_SOURCE_PHYSICAL_OVERRIDE:     Final[str] = "physical_override"
 DECISION_SOURCE_SIGNAL_OVERRIDE:       Final[str] = "signal_override"
 DECISION_SOURCE_SYSTEM_GUARDRAIL:      Final[str] = "system_guardrail"
 DECISION_SOURCE_ML_ADAPTIVE:           Final[str] = "ml_adaptive"
+DECISION_SOURCE_TREND_INFORMED:        Final[str] = "trend_informed"
 DECISION_SOURCE_INCONSISTENCY_OVERRIDE: Final[str] = "inconsistency_override"
 DECISION_SOURCE_INVALID_INPUT_FALLBACK: Final[str] = "invalid_input_fallback"
 DECISION_SOURCE_FAILSAFE:              Final[str] = "failsafe"
@@ -109,6 +115,7 @@ DECISION_SOURCES: Final[FrozenSet[str]] = frozenset({
     DECISION_SOURCE_SIGNAL_OVERRIDE,
     DECISION_SOURCE_SYSTEM_GUARDRAIL,
     DECISION_SOURCE_ML_ADAPTIVE,
+    DECISION_SOURCE_TREND_INFORMED,
     DECISION_SOURCE_INCONSISTENCY_OVERRIDE,
     DECISION_SOURCE_INVALID_INPUT_FALLBACK,
     DECISION_SOURCE_FAILSAFE,

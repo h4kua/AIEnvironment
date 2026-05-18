@@ -49,9 +49,10 @@
   },
   "real_time_prediction": {
     "risk_level": "SAFE",
-    "probability": 0.0068737514401001985,
-    "confidence": 0.9931262485598998,
-    "timestamp": "2026-04-09T10:41:02.374733"
+    "probability": 0.043187862754016516,
+    "confidence_score": null,
+    "data_quality_score": null,
+    "timestamp": "2026-05-18T05:54:21.653122+00:00"
   },
   "deployment_ready": true,
   "generated_at": "2026-04-09T10:41:14.269614"

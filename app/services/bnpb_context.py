@@ -13,13 +13,22 @@ CRITICAL CONTRACT:
 
 from __future__ import annotations
 
+import json
 import logging
+import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 import httpx
+
+from app.api.observability import (
+    BNPB_DATA_STALE_TOTAL,
+    BNPB_FETCH_FAILED_TOTAL,
+    BNPB_VINTAGE_FALLBACK_TOTAL,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +37,16 @@ logger = logging.getLogger(__name__)
 MAPPING_CONFIDENCE_THRESHOLD = 0.70
 
 # ─── Jakarta kota BPS codes ───────────────────────────────────────────────────
-_JAKARTA_KOTA_CODES: frozenset[str] = frozenset({"3171", "3172", "3173", "3174", "3175"})
+# Includes Kepulauan Seribu (3101, Kabupaten) so the live InaRISK parser
+# accepts records for the sixth DKI Jakarta district. The static fallback
+# JSON also publishes a Kepulauan Seribu record, so the alias dictionary
+# below resolves any of its names to the canonical kota string.
+_JAKARTA_KOTA_CODES: frozenset[str] = frozenset(
+    {"3101", "3171", "3172", "3173", "3174", "3175"}
+)
 
 _CODE_TO_KOTA: dict[str, str] = {
+    "3101": "Kepulauan Seribu",
     "3171": "Jakarta Selatan",
     "3172": "Jakarta Timur",
     "3173": "Jakarta Pusat",
@@ -153,6 +169,18 @@ _EXACT_ALIASES: dict[str, str] = {
     "pulo gadung":          "Jakarta Timur",
     "pisangan":             "Jakarta Timur",
 
+    # ── Kepulauan Seribu (Kabupaten code 3101) ───────────────────────────────
+    # Sixth DKI Jakarta administrative unit. Sparse alias set (no kecamatan
+    # cluster maps cleanly to non-archipelago names) — the canonical and
+    # English forms cover the request shapes seen in production.
+    "kepulauan seribu":             "Kepulauan Seribu",
+    "kab. kepulauan seribu":        "Kepulauan Seribu",
+    "kabupaten kepulauan seribu":   "Kepulauan Seribu",
+    "kep. seribu":                  "Kepulauan Seribu",
+    "thousand islands":             "Kepulauan Seribu",
+    "kepulauan seribu utara":       "Kepulauan Seribu",
+    "kepulauan seribu selatan":     "Kepulauan Seribu",
+
     # ── Jakarta Selatan (Kota code 3171) ─────────────────────────────────────
     "jakarta selatan":      "Jakarta Selatan",
     "jak-sel":              "Jakarta Selatan",
@@ -190,11 +218,12 @@ _EXACT_ALIASES: dict[str, str] = {
 
 # Canonical lowercase → canonical proper-case (for substring containment check)
 _CANONICAL_LOWER: dict[str, str] = {
-    "jakarta pusat":   "Jakarta Pusat",
-    "jakarta utara":   "Jakarta Utara",
-    "jakarta barat":   "Jakarta Barat",
-    "jakarta timur":   "Jakarta Timur",
-    "jakarta selatan": "Jakarta Selatan",
+    "jakarta pusat":    "Jakarta Pusat",
+    "jakarta utara":    "Jakarta Utara",
+    "jakarta barat":    "Jakarta Barat",
+    "jakarta timur":    "Jakarta Timur",
+    "jakarta selatan":  "Jakarta Selatan",
+    "kepulauan seribu": "Kepulauan Seribu",
 }
 
 # Short kota aliases used in the exact alias check to distinguish kota-level
@@ -210,6 +239,9 @@ _KOTA_LEVEL_TOKENS: frozenset[str] = frozenset({
     "jakarta timur", "jakarta selatan",
     "kab. jakarta pusat", "kab. jakarta utara", "kab. jakarta barat",
     "kab. jakarta timur", "kab. jakarta selatan",
+    # Sixth DKI Jakarta unit — kabupaten-level tokens.
+    "kepulauan seribu", "kab. kepulauan seribu",
+    "kabupaten kepulauan seribu", "kep. seribu", "thousand islands",
 })
 
 # ─── Score normalisation & classification ────────────────────────────────────
@@ -218,6 +250,7 @@ _THRESHOLD_VERY_HIGH = 0.75
 _THRESHOLD_HIGH = 0.55
 _THRESHOLD_MEDIUM = 0.35
 _MAX_VINTAGE_DAYS = 365
+_DEFAULT_VINTAGE_DAYS = int(os.getenv("BNPB_DEFAULT_VINTAGE_DAYS", "30"))
 _CACHE_TTL = 86_400
 
 # ─── API endpoints ────────────────────────────────────────────────────────────
@@ -225,6 +258,26 @@ _URL_IRBI     = "https://inarisk.bnpb.go.id/api/bencana-irbi"
 _URL_PASOET   = "https://inarisk.bnpb.go.id/api/data_pasoet"
 _URL_PROVINSI = "https://inarisk.bnpb.go.id/api/provinsi"
 _TIMEOUT      = 10.0
+
+# ─── Static fallback ──────────────────────────────────────────────────────────
+# Used when the live InaRISK API is unreachable. Path resolves to
+# ``app/data/bnpb_jakarta_fallback.json``. Override at deploy time via the
+# ``BNPB_STATIC_FALLBACK_PATH`` env var (e.g. point at a curated NFS share).
+_DEFAULT_IRBI_SCORE = 0.5  # Mid-band default for mapped-but-unknown districts.
+_FALLBACK_JSON_PATH = Path(
+    os.getenv(
+        "BNPB_STATIC_FALLBACK_PATH",
+        str(Path(__file__).resolve().parents[1] / "data" / "bnpb_jakarta_fallback.json"),
+    )
+)
+
+# Sentinel ``data_source`` values stamped on every VulnerabilityContext so the
+# gate, traces, and observability counters can distinguish where the score
+# actually came from. Operators MUST be able to tell at a glance whether the
+# decision rode on live, cached-static, or synthetic data.
+DATA_SOURCE_API     = "api"
+DATA_SOURCE_STATIC  = "static_fallback"
+DATA_SOURCE_DEFAULT = "default"
 
 _cache: dict = {}
 
@@ -240,6 +293,13 @@ class VulnerabilityContext:
     effective_irbi_score: Decay-adjusted score. THIS is what consuming agents use.
                           Decays toward 50% of raw score over 730 days.
     exposure_class:       Classified from effective_irbi_score.
+    data_source:          Provenance tag — ``"api"`` (live InaRISK),
+                          ``"static_fallback"`` (bundled JSON), or
+                          ``"default"`` (mid-band 0.5 stamped because the
+                          district mapped to Jakarta but no IRBI record
+                          existed). Surfaces in bnpb_status so operators
+                          can tell at a glance which lineage drove a decision.
+                          Default ``"api"`` preserves legacy construction.
     """
 
     irbi_flood_score: float       # Raw normalised IRBI, 0.0–1.0
@@ -248,6 +308,7 @@ class VulnerabilityContext:
     affected_population: int
     data_vintage_days: int
     district: str
+    data_source: str = field(default=DATA_SOURCE_API)
 
     def to_dict(self) -> dict:
         return {
@@ -257,6 +318,7 @@ class VulnerabilityContext:
             "population": self.affected_population,
             "district": self.district,
             "data_vintage_days": self.data_vintage_days,
+            "data_source": self.data_source,
         }
 
 
@@ -341,16 +403,32 @@ def get_vulnerability_context(
     try:
         raw_data = fetch_bnpb_data()
         raw_ctx = raw_data.get(district)
+
+        # ── DEFAULT path ────────────────────────────────────────────────────
+        # District mapped to Jakarta scope but no live or static record
+        # exists. Synthesise a mid-band 0.5 context rather than returning
+        # None — the API contract guarantees a non-null vulnerability_score
+        # whenever the input maps cleanly into Jakarta. The caller (and the
+        # gate) sees ``data_source="default"`` and can downgrade trust.
         if not raw_ctx:
-            return None, mapping_info
+            logger.warning(
+                "BNPB no record for mapped district %r — using DEFAULT "
+                "IRBI=%.2f (data_source=default).",
+                district, _DEFAULT_IRBI_SCORE,
+            )
+            return _build_default_vulnerability(district), mapping_info
+
         if raw_ctx.data_vintage_days > _MAX_VINTAGE_DAYS:
+            BNPB_DATA_STALE_TOTAL.inc()
             logger.debug(
-                "BNPB data for %s is %d days old (> %d) — suppressed.",
+                "BNPB data for %s is %d days old (> %d) — using DEFAULT instead.",
                 district, raw_ctx.data_vintage_days, _MAX_VINTAGE_DAYS,
             )
-            return None, mapping_info
+            return _build_default_vulnerability(district), mapping_info
 
-        # Build context with decay-adjusted effective score
+        # Build context with decay-adjusted effective score. Provenance is
+        # preserved from the underlying record (api vs static_fallback) so
+        # the gate can stamp the correct status code.
         effective = _apply_staleness_decay(raw_ctx.irbi_flood_score, raw_ctx.data_vintage_days)
         ctx = VulnerabilityContext(
             irbi_flood_score=raw_ctx.irbi_flood_score,
@@ -359,12 +437,17 @@ def get_vulnerability_context(
             affected_population=raw_ctx.affected_population,
             data_vintage_days=raw_ctx.data_vintage_days,
             district=district,
+            data_source=raw_ctx.data_source,
         )
         return ctx, mapping_info
 
-    except Exception as exc:  # noqa: BLE001
-        logger.debug("get_vulnerability_context(%r) suppressed: %s", location_str, exc)
-        return None, mapping_info
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        BNPB_FETCH_FAILED_TOTAL.labels(type(exc).__name__).inc()
+        logger.warning(
+            "get_vulnerability_context(%r) exception (%s) — using DEFAULT.",
+            location_str, exc,
+        )
+        return _build_default_vulnerability(district), mapping_info
 
 
 # ─── Cache & fetch ────────────────────────────────────────────────────────────
@@ -372,7 +455,18 @@ def get_vulnerability_context(
 def fetch_bnpb_data() -> dict[str, VulnerabilityContext]:
     """
     Return the current cached BNPB vulnerability map for DKI Jakarta kota.
-    Refreshed every 24 hours. Falls back to last good cache on failure.
+
+    Lookup ladder:
+      1. In-memory cache (24 h TTL) — last successful fetch, regardless of source.
+      2. Live InaRISK API. On success the result is cached and returned.
+      3. Static fallback JSON bundled at ``app/data/bnpb_jakarta_fallback.json``.
+         Used when (a) the live API fetch raises, OR (b) the live API returns
+         an empty map (which historically left the system blind). Result is
+         cached with the same 24 h TTL so the next call doesn't re-hit the
+         broken upstream. ``data_source="static_fallback"`` on every record.
+      4. Last-resort: empty cache + warning. The caller's DEFAULT path then
+         takes over for any mapped Jakarta district.
+
     Never raises.
     """
     global _cache
@@ -381,15 +475,104 @@ def fetch_bnpb_data() -> dict[str, VulnerabilityContext]:
     if _cache and age < _CACHE_TTL:
         return _cache["data"]
 
+    # ── Live API attempt ─────────────────────────────────────────────────────
     try:
         fresh = _fetch_from_apis()
-        _cache = {"fetched_at": time.monotonic(), "data": fresh}
-        logger.info("BNPB InaRISK refreshed — %d Jakarta kota loaded.", len(fresh))
-        return fresh
-    except Exception as exc:  # noqa: BLE001
-        fallback = "cached data" if _cache.get("data") else "empty (no prior fetch)"
-        logger.warning("BNPB API fetch failed (%s) — using %s.", exc, fallback)
-        return _cache.get("data", {})
+        if fresh:
+            _cache = {"fetched_at": time.monotonic(), "data": fresh}
+            logger.info("BNPB InaRISK refreshed — %d Jakarta kota loaded.", len(fresh))
+            return fresh
+        logger.warning(
+            "BNPB InaRISK returned empty map — falling back to static JSON."
+        )
+    except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
+        BNPB_FETCH_FAILED_TOTAL.labels(type(exc).__name__).inc()
+        logger.warning(
+            "BNPB API fetch failed (%s) — falling back to static JSON.", exc
+        )
+
+    # ── Static fallback ──────────────────────────────────────────────────────
+    static = _load_static_fallback()
+    if static:
+        _cache = {"fetched_at": time.monotonic(), "data": static}
+        logger.warning(
+            "BNPB static fallback active — %d Jakarta kota loaded from %s "
+            "(source=static_fallback).",
+            len(static),
+            _FALLBACK_JSON_PATH,
+        )
+        return static
+
+    # ── Last resort: prior in-memory cache (possibly empty) ──────────────────
+    legacy = _cache.get("data", {})
+    if not legacy:
+        logger.error(
+            "BNPB lookup exhausted all sources — live API down AND static "
+            "fallback unavailable at %s. Downstream callers will receive "
+            "DEFAULT 0.5 IRBI for any mapped Jakarta district.",
+            _FALLBACK_JSON_PATH,
+        )
+    return legacy
+
+
+def _load_static_fallback() -> dict[str, VulnerabilityContext]:
+    """
+    Read ``bnpb_jakarta_fallback.json`` and materialise it as
+    ``{district: VulnerabilityContext}`` with ``data_source="static_fallback"``.
+
+    Returns ``{}`` (rather than raising) when the file is missing or
+    malformed — the caller treats an empty map as "no data, use DEFAULT".
+    Vintage is stamped at ``_DEFAULT_VINTAGE_DAYS`` so the staleness gate
+    keeps the gate open.
+    """
+    try:
+        with open(_FALLBACK_JSON_PATH, "r", encoding="utf-8-sig") as fh:
+            payload = json.load(fh)
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.error(
+            "BNPB static fallback unreadable at %s: %s", _FALLBACK_JSON_PATH, exc
+        )
+        return {}
+
+    districts = payload.get("districts") or {}
+    result: dict[str, VulnerabilityContext] = {}
+    for district, record in districts.items():
+        if not isinstance(record, dict):
+            continue
+        raw_score = _coerce_float(record.get("irbi_flood_score"))
+        if raw_score is None:
+            continue
+        normalised = min(1.0, max(0.0, raw_score))
+        result[district] = VulnerabilityContext(
+            irbi_flood_score=round(normalised, 4),
+            effective_irbi_score=round(normalised, 4),
+            exposure_class=_classify_exposure(normalised),
+            affected_population=_coerce_int(record.get("affected_population")) or 0,
+            data_vintage_days=_DEFAULT_VINTAGE_DAYS,
+            district=district,
+            data_source=DATA_SOURCE_STATIC,
+        )
+    return result
+
+
+def _build_default_vulnerability(district: str) -> VulnerabilityContext:
+    """
+    Synthetic mid-band context for a district that mapped successfully into
+    Jakarta scope but has no record in either the live API or the static
+    fallback. The contract is: ``vulnerability_score`` must NEVER be null or
+    0.0 due to a missing record — operators get a conservative MEDIUM
+    placeholder and the ``data_source="default"`` tag flags the lineage.
+    """
+    normalised = _DEFAULT_IRBI_SCORE
+    return VulnerabilityContext(
+        irbi_flood_score=normalised,
+        effective_irbi_score=normalised,
+        exposure_class=_classify_exposure(normalised),
+        affected_population=0,
+        data_vintage_days=_DEFAULT_VINTAGE_DAYS,
+        district=district,
+        data_source=DATA_SOURCE_DEFAULT,
+    )
 
 
 def _fetch_from_apis() -> dict[str, VulnerabilityContext]:
@@ -490,7 +673,9 @@ def _resolve_kota_from_name(name: str) -> str | None:
     return None
 
 
-def _estimate_vintage_days(raw: dict | list) -> int:
+def _estimate_vintage_days(raw: dict | list, *, now: "datetime | None" = None) -> int:
+    """Estimate data vintage in days. ``now`` (optional) pins the reference clock."""
+    ref = now if now is not None else datetime.now(timezone.utc)
     records: list = raw if isinstance(raw, list) else raw.get("data", [])
     first = records[0] if records else {}
 
@@ -499,7 +684,7 @@ def _estimate_vintage_days(raw: dict | list) -> int:
         if val:
             try:
                 dt = datetime.fromisoformat(str(val).replace("Z", "+00:00"))
-                return max(0, (datetime.now(timezone.utc) - dt).days)
+                return max(0, (ref - dt).days)
             except (ValueError, TypeError):
                 pass
 
@@ -507,11 +692,17 @@ def _estimate_vintage_days(raw: dict | list) -> int:
     if tahun:
         try:
             mid_year = datetime(int(tahun), 7, 1, tzinfo=timezone.utc)
-            return max(0, (datetime.now(timezone.utc) - mid_year).days)
+            return max(0, (ref - mid_year).days)
         except (ValueError, TypeError):
             pass
 
-    return 365
+    BNPB_VINTAGE_FALLBACK_TOTAL.inc()
+    logger.warning(
+        "BNPB vintage unknown - falling back to default %d days. "
+        "Set BNPB_DEFAULT_VINTAGE_DAYS env to tune.",
+        _DEFAULT_VINTAGE_DAYS,
+    )
+    return _DEFAULT_VINTAGE_DAYS
 
 
 # ─── Internal helpers ─────────────────────────────────────────────────────────

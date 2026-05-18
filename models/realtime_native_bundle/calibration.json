@@ -1,0 +1,20 @@
+{
+  "method": "sigmoid",
+  "validation_recall": 1.0,
+  "validation_precision": 0.9254901960784314,
+  "source": "models/realtime_native_bundle/threshold.json",
+  "folds": [
+    {
+      "a": -5.530539914623798,
+      "b": 4.9419227877042555
+    },
+    {
+      "a": -3.1726136460023873,
+      "b": 3.9706801086695056
+    },
+    {
+      "a": -2.6603838069141625,
+      "b": 3.1047453568195853
+    }
+  ]
+}

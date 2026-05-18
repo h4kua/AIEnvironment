@@ -91,7 +91,7 @@ SCENARIO_LABELS: dict[str, ScenarioLabel] = {
 }
 
 _RISK_CLASSES = ["SAFE", "WARNING", "DANGER"]
-_STATUS_NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "PIPELINE_FAILURE"}
+_STATUS_NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "FAIL", "PIPELINE_FAILURE"}
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ def _system_status_metrics(
     Also computes false_ok_rate: system claimed OK when actually degraded.
     A system that hides its own failures is operationally dangerous.
     """
-    _NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "PIPELINE_FAILURE"}
+    _NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "FAIL", "PIPELINE_FAILURE"}
 
     correct = 0
     false_ok = 0
@@ -294,7 +294,7 @@ def _system_status_metrics(
 
     for r in evaluated:
         expected = labels[r["scenario_name"]].expected_system_status
-        actual   = r["output"].get("system_status", "UNKNOWN")
+        actual   = r["output"].get("system_status", "PIPELINE_FAILURE")
         if expected == "OK" and actual == "OK":
             correct += 1
         elif expected == "NOT_OK" and actual in _NOT_OK:

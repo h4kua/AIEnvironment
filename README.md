@@ -1,244 +1,130 @@
-# Jakarta Flood Prediction System
+# AI Flood Response Agent System
 
-Sistem prediksi banjir Jakarta yang menggabungkan:
+Production-grade, multi-agent flood prediction and decision system for DKI
+Jakarta. Fuses real-time hydrometeorological signals with administrative
+vulnerability data and serves explainable risk decisions over a FastAPI surface.
 
-- model historis berbasis XGBoost + SHAP
-- model `realtime-native` berbasis sinyal operasional
-- pipeline realtime dari Posko Banjir, BMKG Nowcast, dan OpenWeather
-- API FastAPI untuk inference produksi
+## Overview
 
-## Executive Summary
-
-Project ini dirancang untuk kebutuhan kompetisi AI tingkat tinggi, dengan fokus pada:
-
-- validitas ilmiah
-- konsistensi antara training dan inference
-- explainability dan Responsible AI
-- kesiapan deployment realtime
-
-Sistem menggunakan dua model:
-
-1. `legacy_geospatial`
-Model historis dengan feature geospasial yang kaya dan performa historis kuat.
-
-2. `realtime_native`
-Model ringan yang hanya memakai feature yang benar-benar tersedia saat inference realtime.
-
-Pendekatan dual-model ini membantu narasi kompetisi:
-
-- model lama menunjukkan kekuatan baseline dan kedalaman historis
-- model baru menunjukkan kesesuaian operasional dan validitas deployment realtime
+- Dual ML models: `legacy_geospatial` (historical, feature-rich) and
+  `realtime_native` (operationally aligned, deployment-ready).
+- Four-agent pipeline — Perception, Reasoning, Evaluation, Action — orchestrated
+  by `FloodDecisionPipeline` with per-stage timeouts and idempotency.
+- BNPB InaRISK vulnerability gate with kecamatan-level resolution and static
+  fallback when the upstream API is unreachable.
+- DEMNAS elevation context (flood-zone classification, flow direction) when DEM
+  tiles are available; falls open when missing.
+- Postgres persistence for snapshots, agent stages, decisions, trust
+  breakdowns, and replay scenarios.
 
 ## Architecture
 
-### 1. Data Ingestion
-
-Pipeline `poskobanjir/` mengambil data dari:
-
-- Posko Banjir DKI
-- BMKG CAP / nowcast alerts
-- OpenWeather API
-
-Output utamanya:
-
-- `poskobanjir/data/clean/realtime_snapshot.json`
-
-### 2. Inference Layer
-
-`app/services/` menangani:
-
-- model loading
-- realtime adapter
-- prediction service
-- report refresh
-- data quality dan OOD monitoring
-
-`app/realtime_native/` menangani:
-
-- feature engineering realtime-native
-- bootstrap dataset building
-- training model baru
-- inference realtime-native
-
-### 3. API Layer
-
-FastAPI tersedia di:
-
-- `GET /health`
-- `GET /predict/realtime`
-- `GET /predict/realtime-native`
-
-## Project Structure
-
-```text
-root/
-├── app/
-│   ├── api/
-│   ├── services/
-│   ├── realtime_native/
-│   ├── agents/
-│   └── utils/
-├── poskobanjir/
-├── artifacts/
-│   ├── production/
-│   ├── reports/
-│   ├── visualizations/
-│   ├── configurations/
-│   └── legacy_archive/
-├── models/
-├── data/
-│   ├── raw/
-│   └── processed/
-├── tests/
-├── docs/
-├── notebooks/
-├── requirements.txt
-├── pyproject.toml
-└── README.md
 ```
-
-## Canonical Runtime Files
-
-Model aktif:
-
-- `models/flood_model_jakarta.pkl`
-- `models/scaler_jakarta.pkl`
-- `models/optimal_threshold.json`
-- `models/feature_list_jakarta.json`
-- `models/model_card_jakarta.json`
-
-Model realtime-native:
-
-- `models/feature_list_realtime_native.json`
-- `models/model_card_realtime_native.json`
-- artefak training/inference dikelola oleh `app/realtime_native/training.py`
-
-Manifest produksi:
-
-- `artifacts/production/catalog.json`
-
-Laporan kompetisi:
-
-- `artifacts/reports/advanced_model_report.txt`
-- `artifacts/reports/project_summary.json`
+[Snapshot In] -> SnapshotIn (Pydantic, location-normalised)
+              -> FloodDecisionPipeline
+                 |- PerceptionAgent  (BNPB + DEM + signals)
+                 |- ReasoningAgent   (model inference + adaptive threshold)
+                 |- EvaluationAgent  (plausibility + failure modes)
+                 |- ActionAgent      (decision + routing)
+              -> Postgres (pipeline_runs, perception, reasoning,
+                 evaluation, decisions, trust_breakdowns)
+              -> JSON response (risk_level, probability, bnpb_status,
+                 elevation, decision_trace, safe_route)
+```
 
 ## Quick Start
 
-### 1. Install
-
 ```bash
 python -m venv flood_env
-flood_env\Scripts\activate
+flood_env\Scripts\activate          # Windows
 pip install -r requirements.txt
-```
-
-### 2. Configure Environment
-
-Isi `.env` dengan:
-
-- `OPENWEATHER_API_KEY`
-- koordinat Jakarta bila diperlukan
-
-### 3. Build Latest Snapshot
-
-```bash
-python poskobanjir/main.py
-```
-
-### 4. Run API
-
-```bash
+copy .env.example .env              # then fill in DB + API keys
 uvicorn app.api.main:app --reload
 ```
 
-### 5. Call Endpoints
+Open `http://localhost:8000/docs` for interactive Swagger UI.
+
+## API Usage
+
+| Method | Path                       | Auth | Purpose                          |
+|--------|----------------------------|------|----------------------------------|
+| GET    | `/healthz`                 | no   | Liveness                         |
+| GET    | `/readyz`                  | no   | DB + thresholds readiness        |
+| GET    | `/metrics`                 | yes  | Prometheus metrics               |
+| GET    | `/predict/realtime`        | yes  | Legacy model on latest snapshot  |
+| GET    | `/predict/realtime-native` | no   | Realtime-native model            |
+| POST   | `/predict/agentic`         | yes  | Full agentic pipeline on payload |
+| GET    | `/demo`                    | yes  | HTML dashboard                   |
+
+### Working demo
 
 ```bash
-GET /predict/realtime
-GET /predict/realtime-native
+curl -X POST http://localhost:8000/predict/agentic \
+  -H "x-api-key: dev-local-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fetched_at_utc": "2026-05-18T11:30:00Z",
+    "location": "Jakarta Utara",
+    "openweather": {"main": {"temp": 27.9, "humidity": 91}, "rain": {"1h": 20}, "coord": {"lat": -6.2088, "lon": 106.8456}},
+    "poskobanjir": [{"wilayah": "Jakarta Utara", "tinggi_air": 120, "status": "Siaga 3"}],
+    "bmkg_alerts": [{"headline": "Hujan Lebat Jakarta", "severity": "Moderate", "certainty": "Observed", "urgency": "Immediate"}]
+  }'
 ```
 
-## Output Example
+`location` accepts a canonical kota string (e.g. `"Jakarta Utara"`), a
+kecamatan name (`"Menteng"` → Jakarta Pusat), or a dict
+(`{"district": "Menteng"}`) — the schema-level validator normalises all forms
+and falls back to `Jakarta Utara` on ambiguous input. `Idempotency-Key` is
+honoured for one hour.
 
-### Realtime Prediction
+## Key Features
 
-```json
-{
-  "probability": 0.41,
-  "risk_level": "DANGER",
-  "confidence_score": 0.78,
-  "data_quality": {
-    "score": 0.81
-  },
-  "model_warning": [],
-  "explanation": [
-    {
-      "feature": "max_rainfall",
-      "impact": "increase_risk"
-    }
-  ]
-}
-```
+- Schema-level location normaliser — never raises, always yields a valid kota.
+- BNPB vulnerability gate with status codes `ACTIVE` / `STATIC_FALLBACK` /
+  `DEFAULT` / `NOT_APPLICABLE`.
+- Adaptive risk threshold with shadow evaluation and override trace.
+- Out-of-distribution detection on `realtime_native` features.
+- Per-stage circuit breakers, request budget, and graceful degradation.
+- Idempotent POST with response-hash drift detection.
+- Audit-grade observability: request-id middleware, structured logs,
+  Prometheus metrics, trust breakdowns.
 
-### Realtime-Native Prediction
+## Data Sources
 
-```json
-{
-  "model_variant": "realtime_native",
-  "probability": 0.47,
-  "risk_level": "DANGER",
-  "risk_interpretation": "Sinyal hujan, alert BMKG, atau kenaikan muka air menunjukkan risiko banjir aktif/meningkat.",
-  "recommended_action": [
-    "Aktifkan koordinasi posko dan validasi lapangan di titik rawan."
-  ],
-  "ood_detection": {
-    "method": "IsolationForest",
-    "is_outlier": false
-  }
-}
-```
+- **Posko Banjir DKI** — water heights and siaga status (`poskobanjir/`).
+- **BMKG CAP / Nowcast** — severity, certainty, urgency alerts.
+- **OpenWeather** — temperature, humidity, rainfall, coordinates.
+- **BNPB InaRISK** — kelurahan vulnerability index (live + static fallback in
+  `app/data/bnpb_jakarta_fallback.json`).
+- **DEMNAS** — 8 m DEM tiles for elevation context. Place tiles in `demnas/`:
+  `DEMNAS_1209-42_v1.0.tif`, `DEMNAS_1209-43_v1.0.tif`,
+  `DEMNAS_1209-44_v1.0.tif`. Missing tiles fail open — elevation fields
+  return `None` / `"unknown"` and the API keeps serving.
 
-## Scientific Positioning
-
-### Legacy Historical Model
-
-Kelebihan:
-
-- kaya feature historis dan geospasial
-- performa baseline kuat
-
-Keterbatasan:
-
-- perlu adapter untuk feature yang tidak tersedia langsung saat realtime
-
-### Realtime-Native Model
-
-Kelebihan:
-
-- feature training dan inference selaras
-- lebih ringan
-- lebih mudah dijelaskan ke reviewer non-teknis
-
-Keterbatasan:
-
-- histori observasional realtime penuh belum lengkap
-- bootstrap dataset masih memakai proxy yang ditandai eksplisit
-
-## Testing
+## Test Suite
 
 ```bash
-pytest tests/unit/
+pytest tests/ --tb=short
 ```
 
-## Important Notes For Reviewers
+Current baseline: **393 passed / 4 known failures** (failure-simulation x3 +
+migration-runner x1, all unrelated to the serving path). Coverage spans unit,
+integration, route, persistence, and failure-injection layers.
 
-- File lama tidak dihapus langsung; semuanya dipindahkan ke `artifacts/legacy_archive/`
-- Struktur runtime aktif dipertahankan bersih agar mudah diaudit
-- `advanced_model_report.txt` dan `project_summary.json` tetap dipertahankan sebagai artefak kompetisi utama
+## Environment Variables
 
-## Useful References
+See `.env.example` for the full template. The critical ones:
 
-- `docs/guides/REALTIME_NATIVE_MODEL_GUIDE.md`
-- `docs/guides/API_USAGE_GUIDE.py`
-- `artifacts/production/catalog.json`
-- `artifacts/legacy_archive/README.md`
+| Variable                   | Purpose                                  |
+|----------------------------|------------------------------------------|
+| `FLOOD_API_KEYS`           | Comma-separated keys for `x-api-key`     |
+| `FLOOD_API_RATE_LIMIT`     | Per-key requests / minute                |
+| `FLOOD_REQUEST_BUDGET_S`   | Per-request timeout budget               |
+| `ALLOWED_HOSTS`            | Trusted-host allowlist                   |
+| `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD` | Postgres |
+| `OPENWEATHER_API_KEY`      | Snapshot ingestion                       |
+| `ANTHROPIC_API_KEY`        | LLM-assisted reasoning narratives        |
+| `GOOGLE_MAPS_API_KEY`      | Safe-route generation                    |
+| `BNPB_DEFAULT_VINTAGE_DAYS`| Fallback vintage when InaRISK is silent  |
+| `FLOOD_ALLOW_RUNTIME_SCRAPE` | Set `1` to enable on-demand scraping   |
+| `MODEL_PATH` / `SCALER_PATH` / `THRESHOLD_PATH` | Model artifacts paths |

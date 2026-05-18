@@ -1,35 +1,41 @@
 """
-Temporal trend analysis — tracks risk evolution across recent pipeline predictions.
+Temporal trend analysis — DB-backed, restart-safe, multi-worker deterministic.
 
-Upgrades over baseline implementation:
-  - History buffer: 8 predictions (was 3) for better trend resolution
-  - Weighted trend: exponential weights so recent readings dominate
-  - Rate-of-change: computed against actual timestamps (probability per hour)
-  - Trend confidence: directional consistency across all consecutive pairs
-  - Spike detection: single-step probability jump >= SPIKE_THRESHOLD
-  - Slow accumulation: monotone rising trend sustained over ACCUMULATION_STEPS
-  - Richer output: trend_strength, trend_confidence, anomaly_detected, anomaly_type
+H2A: the process-local deque ring buffer has been replaced with a
+PostgreSQL-backed trend_history table. compute_trend() reads from the shared
+DB so all workers produce identical results for identical history.
 
-Public API (unchanged signatures — backward compatible):
-  record_prediction(probability, risk_level, water_level_ratio, rainfall_mm) -> None
-  compute_trend() -> dict  (richer output; all prior keys preserved)
-  reset_history() -> None
+Public API (backward compatible; station_id is keyword-only with a default):
+  record_prediction(probability, risk_level, water_level_ratio, rainfall_mm,
+                    *, station_id='default') -> None
+  compute_trend(*, station_id='default') -> dict
+  reset_history(*, station_id='default') -> None
 
-The module-level ring buffer persists across API requests (process lifetime),
-giving the system memory of recent conditions — essential for detecting rapid-onset
-events that appear mild on a single reading.
+Failure semantics:
+  record_prediction DB failure  -> warning logged, write skipped (fail open);
+                                   next compute_trend returns insufficient_data.
+  compute_trend DB failure      -> returns _insufficient(0) (fail closed —
+                                   no invented trend state).
+  reset_history DB failure      -> warning logged.
 """
 
 from __future__ import annotations
 
+import logging
 import math
-from collections import deque
 from datetime import datetime, timezone
-from threading import Lock
+
+from db.psycopg2_connection import pooled_connection
+from db.trend_repository import (
+    delete_trend_records,
+    get_recent_trend_records,
+    insert_trend_record,
+)
+
+logger = logging.getLogger(__name__)
 
 _HISTORY_SIZE = 8
-_history: deque = deque(maxlen=_HISTORY_SIZE)
-_lock = Lock()
+_DEFAULT_STATION = "default"
 
 # Trend classification thresholds
 _PROB_TREND_THRESHOLD     = 0.08    # Weighted delta to classify increasing/decreasing
@@ -42,47 +48,85 @@ _ACCUMULATION_STEPS    = 4      # Consecutive rising steps to flag slow accumula
 _MIN_RATE_HOURS        = 0.005  # ~18 seconds — guard against divide-by-zero
 
 
+# ── Public API ────────────────────────────────────────────────────────────────
+
 def record_prediction(
     probability: float,
     risk_level: str,
     water_level_ratio: float | None,
     rainfall_mm: float | None,
+    *,
+    station_id: str = _DEFAULT_STATION,
+    observed_at: datetime | None = None,
 ) -> None:
-    """Append a completed prediction snapshot to the ring buffer."""
-    with _lock:
-        _history.append({
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
-            "probability": probability,
-            "risk_level": risk_level,
-            "water_level_ratio": water_level_ratio,
-            "rainfall_mm": rainfall_mm,
-        })
-
-
-def compute_trend() -> dict:
     """
-    Derive rich trend signals from the prediction ring buffer.
+    Persist a completed prediction snapshot to trend_history.
 
-    Returns:
-    {
-        "risk_delta_1h":       float  — exponentially-weighted probability change
-        "risk_rate_per_hour":  float  — probability change per actual elapsed hour
-        "risk_trend":          str    — "increasing"|"decreasing"|"stable"|"insufficient_data"
-        "trend_strength":      float  — 0.0-1.0 (normalised to 0.40 delta = max strength)
-        "trend_confidence":    float  — 0.0-1.0 directional consistency across steps
-        "water_level_trend":   str    — "rising"|"falling"|"stable"|"insufficient_data"
-        "rainfall_trend":      str    — "intensifying"|"easing"|"stable"|"insufficient_data"
-        "anomaly_detected":    bool
-        "anomaly_type":        str|None — "spike"|"slow_accumulation"|None
-        "data_points":         int
-    }
-
-    All keys from the previous implementation are preserved for backward
-    compatibility with flood_pipeline.py and downstream consumers.
+    ``observed_at`` (optional) pins the row timestamp for deterministic replay.
+    When omitted, the current UTC time is used to preserve existing behavior.
     """
-    with _lock:
-        history = list(_history)
+    ts = observed_at if observed_at is not None else datetime.now(timezone.utc)
+    try:
+        with pooled_connection() as conn:
+            insert_trend_record(
+                conn,
+                station_id=station_id,
+                observed_at=ts,
+                probability=probability,
+                risk_level=risk_level,
+                water_level_ratio=water_level_ratio,
+                rainfall_mm=rainfall_mm,
+                max_history=_HISTORY_SIZE,
+            )
+    except Exception as exc:
+        logger.warning("trend_analysis.record_prediction: DB write failed — %s", exc)
 
+
+def compute_trend(
+    *,
+    station_id: str = _DEFAULT_STATION,
+    as_of: datetime | None = None,
+) -> dict:
+    """
+    Read trend_history from DB and derive trend signals.
+
+    ``as_of`` (optional) restricts the read window to rows strictly older than
+    that timestamp. Used by the deterministic-replay path so the trend block
+    inside inference does not drift with same-call inserts.
+
+    Returns the same dict structure as before; all prior keys are preserved.
+    Returns _insufficient(0) if the DB is unavailable (fail closed).
+    """
+    try:
+        with pooled_connection() as conn:
+            history = get_recent_trend_records(
+                conn, station_id=station_id, limit=_HISTORY_SIZE, as_of=as_of,
+            )
+    except Exception as exc:
+        logger.warning("trend_analysis.compute_trend: DB read failed — %s", exc)
+        return _insufficient(0)
+
+    return _compute_from_records(history)
+
+
+def reset_history(*, station_id: str = _DEFAULT_STATION) -> None:
+    """Delete all trend_history rows for this station. Used in testing."""
+    try:
+        with pooled_connection() as conn:
+            delete_trend_records(conn, station_id=station_id)
+    except Exception as exc:
+        logger.warning("trend_analysis.reset_history: DB delete failed — %s", exc)
+
+
+# ── Pure computation (DB-independent, fully testable) ─────────────────────────
+
+def _compute_from_records(history: list[dict]) -> dict:
+    """
+    Derive rich trend signals from an ordered (oldest-first) record list.
+
+    Pure function — deterministic, no side effects. compute_trend() and
+    unit tests both call this directly.
+    """
     n = len(history)
     if n < 2:
         return _insufficient(n)
@@ -90,7 +134,6 @@ def compute_trend() -> dict:
     probs = [h["probability"] for h in history]
 
     # ── Exponentially-weighted probability trend ─────────────────────────────
-    # Weight for point i: exp(0.5 * (i - (n-1))); newest point has weight 1.0.
     weights = [math.exp(0.5 * (i - (n - 1))) for i in range(n)]
     w_sum = sum(weights)
 
@@ -117,10 +160,10 @@ def compute_trend() -> dict:
     else:
         risk_trend = "stable"
 
-    # ── Trend strength (0.0-1.0) ──────────────────────────────────────────────
+    # ── Trend strength (0.0–1.0) ──────────────────────────────────────────────
     trend_strength = round(min(abs(weighted_delta) / 0.40, 1.0), 4)
 
-    # ── Trend confidence: fraction of consecutive pairs in majority direction ──
+    # ── Trend confidence: fraction of consecutive pairs in majority direction ─
     trend_confidence = _directional_consistency(probs)
 
     # ── Auxiliary signal trends ───────────────────────────────────────────────
@@ -145,7 +188,7 @@ def compute_trend() -> dict:
         "water_level_trend": wl_trend,
         "rainfall_trend": rf_trend,
         "data_points": n,
-        # New enriched keys
+        # Enriched keys
         "risk_rate_per_hour": rate_per_hour,
         "trend_strength": trend_strength,
         "trend_confidence": trend_confidence,
@@ -154,13 +197,7 @@ def compute_trend() -> dict:
     }
 
 
-def reset_history() -> None:
-    """Clear the ring buffer. Used in scenario testing to isolate runs."""
-    with _lock:
-        _history.clear()
-
-
-# ── Internal helpers ──────────────────────────────────────────────────────────
+# ── Internal helpers (unchanged semantics) ────────────────────────────────────
 
 def _insufficient(n: int) -> dict:
     return {
@@ -213,9 +250,9 @@ def _directional_consistency(probs: list[float]) -> float:
     """
     Fraction of consecutive pairs going in the majority direction.
 
-    1.0 = all pairs move the same way (perfect trend).
+    1.0 = all pairs move the same way.
     0.5 = half up half down (no clear trend).
-    0.0 = perfectly alternating (anti-trend / noise).
+    0.0 = perfectly alternating.
     """
     if len(probs) < 2:
         return 0.0
@@ -231,14 +268,10 @@ def _detect_anomaly(probs: list[float]) -> str | None:
     Detect two anomaly patterns:
 
     spike:             Any single consecutive-pair delta >= SPIKE_THRESHOLD.
-                       Represents rapid-onset events (e.g. dam release, flash flood).
-
     slow_accumulation: All ACCUMULATION_STEPS most-recent values form a strict
-                       monotone increasing sequence (no large single jump, but
-                       sustained risk creep that may precede a threshold crossing).
+                       monotone increasing sequence.
 
     Spike takes priority if both conditions hold.
-    Returns the anomaly type string, or None if no anomaly.
     """
     if len(probs) < 2:
         return None

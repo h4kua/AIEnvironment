@@ -32,7 +32,11 @@ from app.pipeline.flood_pipeline import FloodDecisionPipeline
 from app.services.plausibility_check import score_plausibility
 from app.services.trend_analysis import reset_history
 
-_pipeline = FloodDecisionPipeline()
+
+def _get_pipeline() -> FloodDecisionPipeline:
+    if not hasattr(_get_pipeline, "_pipeline"):
+        _get_pipeline._pipeline = FloodDecisionPipeline()  # type: ignore[attr-defined]
+    return _get_pipeline._pipeline  # type: ignore[attr-defined]
 
 
 # ─── Real-world scenario metadata (Task 2) ────────────────────────────────────
@@ -357,7 +361,7 @@ def run_scenarios() -> list[dict]:
         snap: dict = {}
         try:
             snap, summary, expected = builder()
-            output = _pipeline.run(snap)
+            output = _get_pipeline().run(snap)
         except Exception as exc:
             output = {
                 "system_status": "PIPELINE_FAILURE",
@@ -392,7 +396,7 @@ def run_scenarios() -> list[dict]:
 def _build_metric_record(name: str, output: dict, ground_truth) -> dict:
     """Build a structured ground-truth comparison record for aggregate_evaluation_report."""
     predicted_risk = output.get("risk_level", "UNKNOWN")
-    predicted_status = output.get("system_status", "UNKNOWN")
+    predicted_status = output.get("system_status", "PIPELINE_FAILURE")
     has_failures = len(output.get("failure_modes", [])) > 0
 
     confidence = float(output.get("confidence_score") or 0.5)
@@ -422,7 +426,7 @@ def _build_metric_record(name: str, output: dict, ground_truth) -> dict:
 
     risk_correct = predicted_risk == expected_risk
     # Partial credit: NOT_OK matches any non-OK status
-    _NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "PIPELINE_FAILURE"}
+    _NOT_OK = {"DEGRADED", "CONFLICT", "LOW_TRUST", "FAIL", "PIPELINE_FAILURE"}
     if expected_status_raw == "OK":
         status_correct = predicted_status == "OK"
     else:

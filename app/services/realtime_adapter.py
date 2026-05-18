@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+from app.services.bmkg_filter import filter_jakarta_bmkg_alerts
 from app.services.constants import (
     BMKG_CERTAINTY_WEIGHTS,
     BMKG_SEVERITY_WEIGHTS,
@@ -131,14 +132,11 @@ def _summarize_bmkg_alerts(alerts):
     total_score = sum(item["weighted_score"] for item in details)
     normalized_score = min(total_score, 1.0)
     rainfall_influence_mm = normalized_score * 45.0
-    soil_moisture_influence = normalized_score * 12.0
-
     return {
         "alerts": details,
         "total_weighted_score": total_score,
         "normalized_score": normalized_score,
         "rainfall_influence_mm": rainfall_influence_mm,
-        "soil_moisture_influence": soil_moisture_influence,
         "extreme_weather_flag": int(normalized_score >= 0.45),
     }
 
@@ -212,7 +210,8 @@ def adapt_snapshot_to_features(snapshot):
     baselines = _load_baselines()
     region_name, region_profile, region_source = _select_region(snapshot, baselines)
     weather = snapshot.get("openweather", {})
-    alerts = snapshot.get("bmkg_alerts", [])
+    raw_alerts = snapshot.get("bmkg_alerts", [])
+    alerts = filter_jakarta_bmkg_alerts(raw_alerts)
     poskobanjir_records = snapshot.get("poskobanjir", [])
     timestamp = _parse_timestamp(snapshot.get("fetched_at_utc"))
 
@@ -230,13 +229,7 @@ def adapt_snapshot_to_features(snapshot):
     slope = region_profile["slope"]
     max_rainfall = hydrology["effective_max_rainfall"]
     avg_rainfall = min(max_rainfall, max(hydrology["effective_avg_rainfall"], 0.0))
-    soil_moisture = min(
-        100.0,
-        region_profile["soil_moisture"] * 0.55
-        + humidity * 0.25
-        + hydrology["water_gate_ratio"] * 18.0
-        + bmkg_signal["soil_moisture_influence"],
-    )
+    soil_moisture = float(region_profile["soil_moisture"])
     month = timestamp.month
 
     row = {
@@ -247,7 +240,6 @@ def adapt_snapshot_to_features(snapshot):
         "ndvi": ndvi,
         "slope": slope,
         "soil_moisture": soil_moisture,
-        "year": timestamp.year,
         "month": month,
         "lat": lat,
         "long": lon,
@@ -266,8 +258,7 @@ def adapt_snapshot_to_features(snapshot):
         "elevation": region_source,
         "ndvi": region_source,
         "slope": region_source,
-        "soil_moisture": "derived_hybrid",
-        "year": "snapshot_timestamp",
+        "soil_moisture": region_source,
         "month": "snapshot_timestamp",
         "lat": "openweather_observed" if weather.get("coord", {}).get("lat") is not None else region_source,
         "long": "openweather_observed" if weather.get("coord", {}).get("lon") is not None else region_source,
@@ -284,6 +275,8 @@ def adapt_snapshot_to_features(snapshot):
         "selected_region": region_name,
         "baseline_profile": region_profile,
         "bmkg_alert_count": len(alerts),
+        "bmkg_alerts_total": len(raw_alerts),
+        "bmkg_alerts_filtered_out": max(len(raw_alerts) - len(alerts), 0),
         "bmkg_weighted_signal": bmkg_signal,
         "poskobanjir_record_count": len(poskobanjir_records),
         "observed_rainfall_mm": hydrology["observed_rainfall"],
@@ -293,10 +286,11 @@ def adapt_snapshot_to_features(snapshot):
         "adapter_strategy": {
             "geospatial_features": "regional baseline anchored to training distribution",
             "hydrometeorology": "hybrid estimation from OpenWeather + BMKG CAP + Posko Banjir",
-            "trade_off": "Menjaga kompatibilitas model lama sambil menandai feature estimasi secara eksplisit.",
+            "trade_off": "Kompatibilitas model lama dipertahankan sambil menjaga soil moisture tetap sebagai baseline regional statis.",
         },
         "adapter_notes": [
             "Feature geospasial yang tidak tersedia realtime tetap diberi baseline regional agar inferensi stabil.",
+            "Alert BMKG non-Jakarta dibuang sebelum scoring agar snapshot nasional tidak mencemari inferensi Jakarta.",
             "BMKG kini dipakai sebagai weighted hazard signal berbasis severity, certainty, dan urgency.",
             "Output menyertakan kualitas data agar estimasi tidak disalahartikan sebagai observasi penuh.",
         ],

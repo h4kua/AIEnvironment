@@ -1,0 +1,14 @@
+{
+  "bundle_version": "2.0.0",
+  "model_sha256": "be865c08568d2701e6d86c30408a0f8c860c8a30cb57f96f4cc57e5e35ab738a",
+  "ood_sha256": "3129fee163e2ca3b33ba562a424b0cee701f88c84661b9ed4bfe1dda35f9359e",
+  "probability": 0.0432,
+  "confidence": 0.4954,
+  "is_outlier": true,
+  "ood_score": -0.0662,
+  "raw_conf": 0.4954,
+  "floor_in_card": 0.6,
+  "capped": false,
+  "outlier_rate_history": 0.0,
+  "history_rows_scored": 1406
+}

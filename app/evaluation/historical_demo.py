@@ -39,7 +39,11 @@ from app.services.trend_analysis import reset_history
 
 logger = logging.getLogger(__name__)
 
-_pipeline = FloodDecisionPipeline()
+
+def _get_pipeline() -> FloodDecisionPipeline:
+    if not hasattr(_get_pipeline, "_pipeline"):
+        _get_pipeline._pipeline = FloodDecisionPipeline()  # type: ignore[attr-defined]
+    return _get_pipeline._pipeline  # type: ignore[attr-defined]
 
 
 # ── Output types ──────────────────────────────────────────────────────────────
@@ -299,7 +303,7 @@ def simulate_event(
         kw = _inject_noise(snap_kwargs, rng) if add_noise else snap_kwargs
         snap = _build_snapshot(**kw)
         try:
-            output = _pipeline.run(snap)
+            output = _get_pipeline().run(snap)
         except Exception as exc:
             logger.warning("Pipeline error at T-%.0fh: %s", hours_before, exc)
             output = {"risk_level": "UNKNOWN", "system_status": "PIPELINE_FAILURE"}
@@ -366,7 +370,7 @@ def simulate_non_event(
 
     reset_history()
     try:
-        output = _pipeline.run(_safe_snapshot())
+        output = _get_pipeline().run(_safe_snapshot())
     except Exception as exc:
         logger.warning("Pipeline error in non-event sim: %s", exc)
         output = {"risk_level": "UNKNOWN", "system_status": "PIPELINE_FAILURE"}
@@ -527,12 +531,12 @@ def run_ood_scenarios() -> dict:
     for name, snap in scenarios.items():
         reset_history()
         try:
-            output = _pipeline.run(snap)
+            output = _get_pipeline().run(snap)
             risk = output.get("risk_level", "UNKNOWN")
             results[name] = {
                 "risk_level": risk,
                 "probability": round(output.get("probability", 0.0), 4),
-                "system_status": output.get("system_status", "UNKNOWN"),
+                "system_status": output.get("system_status", "PIPELINE_FAILURE"),
                 "pass": True,
             }
         except Exception as exc:

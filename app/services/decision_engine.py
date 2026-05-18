@@ -25,22 +25,86 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import lru_cache
 
+# PHASE 2 DELEGATION: canonical decision authority lives in app.domain.decide().
+# This module is now a THIN ADAPTER that builds typed inputs, calls decide(),
+# and maps the canonical Decision back into the legacy DecisionResult shape
+# that ActionAgent and tests already consume. The legacy escalation body
+# below the adapter is preserved as _legacy_run_decision_engine_unused for
+# Phase 3 conformance comparison; it is no longer reachable from production.
+from app.contracts import (
+    DecisionAuthority,
+    Driver as CanonicalDriver,
+    RiskLevel,
+    SystemStatus,
+)
+from app.domain import (
+    AdaptiveThresholds,
+    FailureMode as CanonicalFailureMode,
+    PerceptionInputs,
+    PhysicalSignals,
+    ReasoningInputs,
+    TrendSnapshot,
+    decide as canonical_decide,
+)
+from app.contracts.vocabulary import FailureSeverity
+from app.realtime_native.bundle import derive_threshold_triplet
+
 _log = logging.getLogger(__name__)
 
-# ─── Physical override thresholds ────────────────────────────────────────────
-_HYDRO_SIAGA1_SEVERITY      = 1.00   # unconditional DANGER
-_HYDRO_SIAGA2_NEAR_SEVERITY = 0.75   # DANGER when also near next threshold
-_HYDRO_RAPID_SEVERITY       = 0.50   # DANGER when rapid escalation present
-_HYDRO_MIN_PLAUSIBILITY     = 0.30   # below this the physical data itself is suspect
 
-# ─── Calibration penalty ─────────────────────────────────────────────────────
-_ECE_PENALTY_THRESHOLD = 0.10         # ECE above this → apply confidence penalty
-_ECE_PENALTY_SCALE     = 2.00         # (ECE − threshold) × scale = fractional reduction
-_ECE_MIN_MULTIPLIER    = 0.80         # never penalise more than 20%
+# ─── Canonical-authority -> legacy decision_source mapping ───────────────────
+# Maps DecisionAuthority enum (which L-level fired) to the legacy decision_source
+# string that ActionAgent and downstream consumers already understand.
+_AUTHORITY_TO_SOURCE = {
+    DecisionAuthority.L0_PHYSICAL: "invalid_input_fallback",
+    DecisionAuthority.L1_SIAGA:    "physical_override",
+    DecisionAuthority.L1_5_MULTI:  "signal_override",
+    DecisionAuthority.L2_INTEGRITY: "system_guardrail",
+    DecisionAuthority.L3_ML:       "ml_adaptive",
+    DecisionAuthority.L4_TREND:    "trend_informed",
+}
 
-# ─── Inconsistency detection ─────────────────────────────────────────────────
-_INCONSISTENCY_HYDRO_MIN  = 0.75      # hydrology severity contradicting SAFE
-_INCONSISTENCY_DELTA_MIN  = 0.08      # probability trend delta contradicting SAFE
+_FAILURE_SEVERITY_NORMALIZE = {
+    "low": FailureSeverity.LOW,
+    "medium": FailureSeverity.MEDIUM,
+    "high": FailureSeverity.HIGH,
+    "critical": FailureSeverity.CRITICAL,
+}
+
+# Phase 7 cleanup: legacy override / inconsistency / ECE-penalty thresholds
+# removed. They were referenced only by `_legacy_run_decision_engine_unused`,
+# which was deleted in Phase 6. Canonical decision authority
+# (app.domain.decision) carries its own thresholds (`_HYDRO_MIN_PLAUSIBILITY`,
+# `_INCONSISTENCY_HYDRO_MIN`, etc. at the domain level). The calibration
+# penalty remains DEACTIVATED at the adapter level (audit RC-1):
+# `_decision_to_legacy_result` always sets `calibration_penalty=0.0` and
+# `applied=False` regardless of cached ECE — `_load_cached_ece()` is still
+# called for trace-observability ECE diagnostic only.
+
+# ─── Canonical default thresholds (shared with realtime inference) ──────────
+
+
+def _canonical_default_thresholds() -> tuple[float, float, float]:
+    """
+    Return (pre_alert, warning, danger) — single threshold source of truth.
+
+    Reads the realtime-native threshold file when present so /predict/realtime-native
+    and /predict/agentic classify identical probabilities into identical risk_levels.
+    Lazy-imported to avoid module-load cost when callers pass explicit thresholds.
+    """
+    try:
+        from app.realtime_native.inference import _load_thresholds  # local import
+        t = _load_thresholds()
+        pre_alert = float(t["pre_alert"])
+        warning = float(t["warning"])
+        danger = float(t["danger"])
+    except Exception:  # noqa: BLE001
+        normalized = derive_threshold_triplet(danger=0.22)
+        pre_alert = normalized["pre_alert"]
+        warning = normalized["warning"]
+        danger = normalized["danger"]
+    return pre_alert, warning, danger
+
 
 # ─── Calibration cache path ──────────────────────────────────────────────────
 _CALIBRATION_CACHE = os.path.normpath(
@@ -52,8 +116,12 @@ _CALIBRATION_CACHE = os.path.normpath(
 _CALIBRATION_CACHE_MAX_AGE_DAYS = 30
 
 
+def _calibration_mtime() -> float:
+    return os.path.getmtime(_CALIBRATION_CACHE) if os.path.exists(_CALIBRATION_CACHE) else 0.0
+
+
 @lru_cache(maxsize=1)
-def _load_cached_ece() -> float:
+def _load_cached_ece_for_mtime(cache_mtime: float) -> float:
     """
     Read last-computed ECE from cache file; returns 0.0 if absent or unreadable.
 
@@ -95,6 +163,10 @@ def _load_cached_ece() -> float:
     return 0.0
 
 
+def _load_cached_ece() -> float:
+    return _load_cached_ece_for_mtime(_calibration_mtime())
+
+
 # ─── Output dataclass ────────────────────────────────────────────────────────
 
 @dataclass
@@ -109,6 +181,7 @@ class DecisionResult:
     #   "physical_override" | "system_guardrail" | "ml_adaptive" | "trend_informed"
     decision_source: str
     decision_trace: list[str] = field(default_factory=list)
+    decision_trace_struct: list[dict] = field(default_factory=list)
     decision_summary: str = ""
     # One-sentence human-readable explanation based on strongest active signal (Task 10).
     final_reason: str = ""
@@ -118,9 +191,25 @@ class DecisionResult:
     adaptive_threshold: dict = field(default_factory=dict)
     hydrology_narrative: str = ""
     scenario_comparison: dict = field(default_factory=dict)
+    # Phase 5 addition: canonical SystemStatus value computed by app.domain.decide().
+    # Empty default preserves backward compatibility for callers that construct
+    # DecisionResult directly without providing this field. The adapter
+    # populates this from canonical Decision.system_status.value so consumers
+    # (EvaluationAgent, ActionAgent) can detect divergence between
+    # agent-computed and canonical-computed system_status.
+    system_status: str = ""
 
 
-# ─── Public entry point ───────────────────────────────────────────────────────
+# ─── Public entry point — CANONICAL ADAPTER ──────────────────────────────────
+# Phase 2 delegation: this function is now a thin adapter that builds typed
+# inputs from the legacy keyword arguments, calls app.domain.decide() as the
+# SOLE decision authority, and maps the canonical Decision back into the
+# legacy DecisionResult shape that ActionAgent and existing tests consume.
+#
+# The original 565-LOC escalation body is preserved below as
+# _legacy_run_decision_engine_unused for Phase 3 conformance comparison.
+# It is no longer reachable from production callers.
+
 
 def run_decision_engine(
     *,
@@ -139,446 +228,361 @@ def run_decision_engine(
     trust_breakdown=None,           # TrustBreakdown | None
     adaptive_classification: dict | None = None,
     calibration_ece: float | None = None,
+    perception_completeness: float = 1.0,
+    data_freshness_minutes: float = 0.0,
+    elevation_data: dict | None = None,
 ) -> DecisionResult:
     """
-    Run the hierarchical decision engine on a single pipeline output.
+    Adapter around app.domain.decide() — the canonical decision authority.
 
-    Never raises — all failure modes produce a conservative fallback.
+    Builds typed inputs from the legacy keyword arguments, calls decide(),
+    and maps the returned Decision into the legacy DecisionResult shape.
+    Never raises — exception path returns failsafe_decision() (conservative
+    fallback preserving DecisionResult shape).
 
-    Decision authority (highest to lowest priority):
-      L0 — INVALID INPUT GUARD: has_critical_violation=True → WARNING, ML suppressed
-      L1 — Physical Reality:   hydrology SIAGA + plausible data → DANGER override
-      L1.5 Multi-Signal:       extreme rainfall + BMKG + compound risk → DANGER
-      L2 — System Integrity:   CONFLICT/LOW_TRUST guardrails
-      L3 — ML + Adaptive:      calibrated probability × adaptive threshold
-      L4 — Trend Signals:      anomaly extension only (cannot create risk)
+    Decision authority hierarchy (now lives entirely in app.domain.decide()):
+      L0  PHYSICAL  — invalid input or critical violation -> UNKNOWN/FAIL
+      L1  SIAGA     — water_level_ratio >= 0.95 -> DANGER (CRITICAL_HYDROLOGY)
+      L1.5 MULTI    — multi-signal compound -> DANGER (COMPOUND_EVENT)
+      L2  INTEGRITY — severe failures escalate one level OR
+                       inconsistency override (E9/E12)
+      L3  ML        — calibrated probability vs adaptive thresholds
+      L3.7 NEW      — multi-signal early WARNING (E3)
+      L4  TREND     — sustained -> DANGER OR rising-trend SAFE -> PRE_ALERT (E4)
     """
-    trace: list[str] = []
-    risk_level = evaluation_risk_level or "WARNING"
-    confidence  = float(adjusted_confidence) if adjusted_confidence is not None else 0.5
+    try:
+        kwargs_snapshot = dict(
+            evaluation_risk_level=evaluation_risk_level,
+            adjusted_confidence=adjusted_confidence,
+            system_status=system_status,
+            probability=probability,
+            raw_model_confidence=raw_model_confidence,
+            failure_modes=failure_modes or [],
+            baseline_result=baseline_result or {},
+            signals=signals or {},
+            diagnostics=diagnostics or {},
+            hydrology_assessment=hydrology_assessment,
+            plausibility_score=plausibility_score,
+            has_critical_violation=has_critical_violation,
+            trust_breakdown=trust_breakdown,
+            adaptive_classification=adaptive_classification,
+            calibration_ece=calibration_ece,
+            perception_completeness=perception_completeness,
+            data_freshness_minutes=data_freshness_minutes,
+            elevation_data=elevation_data or {},
+        )
 
-    # ── Null-safe input coercion ─────────────────────────────────────────────
-    failure_modes    = failure_modes or []
-    signals          = signals or {}
-    diagnostics      = diagnostics or {}
-    baseline_result  = baseline_result or {}
+        canonical_inputs = _build_canonical_inputs(kwargs_snapshot)
+        decision = canonical_decide(**canonical_inputs)
+        result = _decision_to_legacy_result(decision, kwargs_snapshot)
+        adjusted_risk, threshold_delta, reason = _apply_elevation_adjustment(
+            result.risk_level,
+            kwargs_snapshot.get("elevation_data") or {},
+        )
+        if reason:
+            if adjusted_risk != result.risk_level:
+                result.decision_trace.append(
+                    f"[ELEVATION] risk {result.risk_level} -> {adjusted_risk}: {reason}"
+                )
+                result.decision_summary = (
+                    f"{result.decision_summary} Elevation-adjusted final risk={adjusted_risk}."
+                    if result.decision_summary else f"Elevation-adjusted final risk={adjusted_risk}."
+                )
+                result.risk_level = adjusted_risk
+            else:
+                result.decision_trace.append(
+                    f"[ELEVATION] threshold_delta={threshold_delta:+.3f}: {reason}"
+                )
+            result.adaptive_threshold["elevation_adjustment"] = {
+                "risk_level": adjusted_risk,
+                "threshold_delta": threshold_delta,
+                "reason": reason,
+            }
+            result.final_reason = (
+                f"{result.final_reason} | Elevation adjustment: {reason}"
+                if result.final_reason else f"Elevation adjustment: {reason}"
+            )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        _log.error(
+            "run_decision_engine adapter failed: %s: %s — returning failsafe",
+            type(exc).__name__,
+            exc,
+        )
+        return failsafe_decision(
+            evaluation_risk_level=evaluation_risk_level,
+            adjusted_confidence=adjusted_confidence,
+            error_message=f"adapter_exception: {type(exc).__name__}: {exc}",
+        )
+
+
+# ─── Adapter helpers ──────────────────────────────────────────────────────────
+
+
+def _build_canonical_inputs(kw: dict) -> dict:
+    """
+    Translate the legacy keyword arguments into the typed inputs that
+    app.domain.decide() consumes. Conservative on missing fields: defaults
+    favor SAFE risk and let the canonical L0/L2 layers escalate when warranted.
+    """
+    signals = kw.get("signals") or {}
+    diagnostics = kw.get("diagnostics") or {}
+    trend_state = diagnostics.get("trend_state") or {}
+    ac = kw.get("adaptive_classification") or {}
+    hydro = kw.get("hydrology_assessment")
+
+    hydro_severity = float(getattr(hydro, "severity_score", 0.0) or 0.0) if hydro else 0.0
+    rapid_escalation = bool(getattr(hydro, "rapid_escalation", False)) if hydro else False
+
+    # Real per-station max water-level ratio (cm / SIAGA1_cm). Distinct scale
+    # from the aggregate severity_score — L1 SIAGA / L1.5 thresholds operate on
+    # this physical ratio, NOT on the normalised severity score.
+    station_ratio = 0.0
+    if hydro is not None:
+        stations = getattr(hydro, "stations", None) or []
+        if stations:
+            station_ratio = max(
+                (float(getattr(s, "water_level_ratio", 0.0) or 0.0) for s in stations),
+                default=0.0,
+            )
+        else:
+            station_ratio = max(0.0, min(1.0, hydro_severity))
+
+    plausibility_score = kw.get("plausibility_score", 1.0)
     if isinstance(plausibility_score, dict):
         plausibility_score = float(plausibility_score.get("plausibility_score", 1.0))
-    else:
-        plausibility_score = float(plausibility_score) if plausibility_score is not None else 1.0
-    probability        = float(probability) if probability is not None else 0.0
-    raw_model_confidence = float(raw_model_confidence) if raw_model_confidence is not None else confidence
+    plausibility_score = float(plausibility_score)
+    has_critical_violation = bool(kw.get("has_critical_violation", False))
 
-    # ── Calibration ECE ──────────────────────────────────────────────────────
-    if calibration_ece is None:
-        calibration_ece = _load_cached_ece()
-    calibration_ece = float(calibration_ece) if calibration_ece is not None else 0.0
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 0 — INVALID INPUT GUARD (HIGHEST AUTHORITY)
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Hard architectural invariant: physically invalid inputs MUST NOT have
-    # ML decision authority. When the plausibility hard gate has flagged a
-    # critical violation, the ML probability is computed (for transparency
-    # and trace) but is structurally barred from setting risk_level.
-    #
-    # Conservative fallback:
-    #   risk_level   = "WARNING" — cannot trust SAFE (sensors lying); cannot
-    #                  escalate to DANGER (no verified physical evidence).
-    #   This matches the existing operator playbook for WARNING + LOW_TRUST +
-    #   manual_review: "elevated alert, do not automate, verify in field."
-    #
-    # Why this layer is unbypassable:
-    #   - Returns DecisionResult immediately — no later layer can re-promote risk.
-    #   - decision_source = "invalid_input_fallback" — distinguishable in storage.
-    #   - Trace records the suppressed ML output for auditability.
-    if bool(has_critical_violation):
-        l0_trace = [
-            f"[L0-INVALID-INPUT] Physical impossibility detected "
-            f"(plausibility_score={plausibility_score:.2f}, has_critical_violation=True). "
-            f"ML output ({evaluation_risk_level}, prob={probability:.4f}) is SUPPRESSED — "
-            "ML cannot have decision authority over physically invalid input.",
-            "[L0-INVALID-INPUT] → Conservative fallback: risk_level=WARNING. "
-            "Cannot confirm SAFE without trustworthy sensors; cannot confirm DANGER "
-            "without verified physical evidence. Manual sensor verification required.",
-            f"[FINAL] risk=WARNING, confidence={confidence:.4f}, "
-            "source=invalid_input_fallback",
-        ]
-        return DecisionResult(
-            risk_level="WARNING",
-            confidence_score=round(confidence, 4),
-            decision_source="invalid_input_fallback",
-            decision_trace=l0_trace,
-            decision_summary=(
-                "Input failed the physical plausibility gate — ML decision authority "
-                "suppressed. Conservative WARNING issued pending manual sensor verification."
-            ),
-            final_reason=(
-                "Physically invalid sensor input detected; ML output cannot be trusted. "
-                "WARNING is a conservative placeholder until field verification confirms "
-                "or refutes a flood condition."
-            ),
-            override_trace={
-                "triggered": True,
-                "reason": "invalid_input_guard — has_critical_violation=True",
-                "confidence": "n/a (ML suppressed)",
-                "hydrology_severity": 0.0,
-                "dominant_station": "",
-                "dominant_siaga": "",
-            },
-            inconsistency_check={"detected": False, "reason": ""},
-            confidence_adjustment={
-                "calibration_penalty": 0.0,
-                "calibration_ece": round(calibration_ece, 4),
-                "applied": False,
-                "reason": "calibration not applied — ML output suppressed by L0 guard",
-                "final_confidence": round(confidence, 4),
-            },
-            adaptive_threshold={},
-            hydrology_narrative="",
-            scenario_comparison={},
-        )
-
-    # ── Hydrology fields (safe attribute access) ─────────────────────────────
-    hydro_severity = float(getattr(hydrology_assessment, "severity_score", 0.0) or 0.0)
-    hydro_dominant = str(getattr(hydrology_assessment, "dominant_station", "") or "")
-    hydro_siaga    = str(getattr(hydrology_assessment, "dominant_siaga_level", "normal") or "normal")
-    hydro_near     = int(getattr(hydrology_assessment, "near_threshold_count", 0) or 0)
-    hydro_rapid    = bool(getattr(hydrology_assessment, "rapid_escalation", False))
-    hydro_expl     = str(getattr(hydrology_assessment, "overall_explanation", "") or "")
-    hydro_stations = list(getattr(hydrology_assessment, "stations", []) or [])
-
-    # ── Trend fields (safe access — diagnostics already coerced to dict) ─────
-    trend_state   = diagnostics.get("trend_state") or {}
-    risk_trend    = str(trend_state.get("risk_trend") or "stable")
-    risk_delta    = float(trend_state.get("risk_delta_1h") or 0.0)
-    rate_per_hour = float(trend_state.get("risk_rate_per_hour") or 0.0)
-    wl_trend      = str(trend_state.get("water_level_trend") or "stable")
-    anomaly_type  = trend_state.get("anomaly_type")
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 1 — Physical Reality Override
-    # ═══════════════════════════════════════════════════════════════════════════
-    physical_override   = False
-    override_reason     = ""
-    override_confidence = "low"
-
-    if plausibility_score >= _HYDRO_MIN_PLAUSIBILITY:
-        if hydro_severity >= _HYDRO_SIAGA1_SEVERITY:
-            physical_override   = True
-            override_reason     = (
-                f"{hydro_dominant} at {hydro_siaga.upper()} "
-                f"(severity={hydro_severity:.2f}) — critical water level "
-                "confirmed by BPBD operational thresholds"
-            )
-            override_confidence = "high"
-        elif hydro_severity >= _HYDRO_SIAGA2_NEAR_SEVERITY and hydro_near > 0:
-            physical_override   = True
-            override_reason     = (
-                f"{hydro_dominant} at {hydro_siaga.upper()} with "
-                f"{hydro_near} station(s) approaching next alert level — "
-                "near-threshold imminent escalation"
-            )
-            override_confidence = "medium"
-        elif hydro_rapid and hydro_severity >= _HYDRO_RAPID_SEVERITY:
-            physical_override   = True
-            override_reason     = (
-                f"Rapid hydrological escalation at {hydro_dominant} — "
-                "rapid water level rise with elevated siaga status"
-            )
-            override_confidence = "medium"
-
-    if physical_override:
-        risk_level      = "DANGER"
-        decision_source = "physical_override"
-        trace.append(
-            f"[L1-PHYSICAL] {hydro_dominant} {hydro_siaga.upper()} "
-            f"(severity={hydro_severity:.2f}) overrides ML output ({evaluation_risk_level})"
-        )
-        trace.append(
-            f"[L1-PHYSICAL] → Risk escalated to DANGER "
-            f"(physical confidence: {override_confidence})"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 1.5 — Extreme Multi-Signal Override
-    # Triggers when physical sensors (L1) didn't fire but extreme compound conditions
-    # are independently confirmed: extreme rainfall + BMKG Extreme/confirmed alert +
-    # compound risk all active simultaneously, with plausible input data.
-    # This catches events where station SIAGA data isn't available in real-time but
-    # the atmospheric + BMKG signals confirm an extreme event.
-    # ═══════════════════════════════════════════════════════════════════════════
-    elif (
-        plausibility_score >= 0.70
-        and signals.get("extreme_rainfall")
-        and signals.get("bmkg_confirmed")
-        and signals.get("compound_risk")
-        and risk_level in ("SAFE", "WARNING")
-    ):
-        risk_level      = "DANGER"
-        decision_source = "signal_override"
-        trace.append(
-            "[L1.5-SIGNAL] Extreme rainfall + BMKG confirmed + compound risk "
-            f"active simultaneously (plausibility={plausibility_score:.2f}) — "
-            f"overrides ML output ({evaluation_risk_level})"
-        )
-        trace.append(
-            "[L1.5-SIGNAL] → Risk escalated to DANGER "
-            "(multi-signal extreme event, physical station data unavailable)"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 2 — System Integrity Guardrails
-    # ═══════════════════════════════════════════════════════════════════════════
-    elif system_status in ("CONFLICT", "LOW_TRUST"):
-        decision_source = "system_guardrail"
-        if risk_level == "SAFE":
-            # Only escalate SAFE→WARNING when positive flood signals exist and data is
-            # plausible enough to trust. Pure data-absence failures (missing_data, ood_input
-            # with low plausibility) should not manufacture WARNING from nothing.
-            _positive_flood_signals = (
-                "extreme_rainfall", "high_rainfall", "sustained_rainfall",
-                "critical_water_level", "high_water_level", "rising_water",
-                "rapid_rise", "bmkg_extreme", "bmkg_confirmed", "compound_risk",
-                "hydro_stress",
-            )
-            _has_flood_signal = any(signals.get(k) for k in _positive_flood_signals)
-            if _has_flood_signal and plausibility_score >= 0.40:
-                risk_level = "WARNING"
-                trace.append(
-                    f"[L2-GUARDRAIL] {system_status} — positive flood signals present "
-                    f"(plausibility={plausibility_score:.2f}), SAFE escalated to WARNING"
-                )
-            else:
-                trace.append(
-                    f"[L2-GUARDRAIL] {system_status} — no positive flood signals or "
-                    f"low plausibility ({plausibility_score:.2f}), SAFE retained"
-                )
-        else:
-            trace.append(
-                f"[L2-GUARDRAIL] {system_status} — ML result ({risk_level}) retained "
-                "with reduced confidence; manual verification required"
-            )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 3 — ML + Adaptive Threshold
-    # ═══════════════════════════════════════════════════════════════════════════
-    else:
-        decision_source = "ml_adaptive"
-        trace.append(
-            f"[L3-ML] probability={probability:.4f} → {risk_level} "
-            f"(system: {system_status}, confidence: {confidence:.4f})"
-        )
-        if adaptive_classification:
-            eff = adaptive_classification.get("effective_danger_threshold", 0.45)
-            net = float(adaptive_classification.get("net_adjustment", 0.0))
-            if abs(net) > 0.001:
-                direction = "lowered" if net < 0 else "raised"
-                trace.append(
-                    f"[L3-ML] Adaptive threshold {direction} by {net:+.3f} "
-                    f"to {eff:.3f} — context-adjusted classification"
-                )
-            else:
-                trace.append(
-                    f"[L3-ML] Base threshold {eff:.3f} unchanged — no context adjustments"
-                )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 3.5 — Signal Conflict Conservative Escalation
-    # When ML says SAFE but a signal_conflict failure is active alongside BMKG
-    # extreme/confirmed alerts, the competing signals indicate genuine uncertainty
-    # that warrants at least WARNING. Applies only when data is plausible.
-    # ═══════════════════════════════════════════════════════════════════════════
-    if (
-        risk_level == "SAFE"
-        and any(f.get("type") == "signal_conflict" for f in failure_modes)
-        and (signals.get("bmkg_confirmed") or signals.get("bmkg_extreme"))
-        and plausibility_score >= 0.70
-    ):
-        risk_level      = "WARNING"
-        decision_source = "signal_override"
-        trace.append(
-            "[L3.5-CONFLICT] signal_conflict + BMKG confirmed/extreme — "
-            "competing evidence warrants conservative WARNING (plausibility="
-            f"{plausibility_score:.2f})"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PLAUSIBILITY GATE — Suppress ML escalation on implausible inputs
-    # When input data is highly implausible (IsolationForest flagged extreme outlier),
-    # any ML-derived WARNING/DANGER is likely caused by the impossible values
-    # themselves (e.g., 650 mm/h rain, humidity=200%) rather than real flood conditions.
-    # Physical overrides and multi-signal overrides bypass this gate — they use
-    # station-level and BMKG data that is independently validated.
-    # ═══════════════════════════════════════════════════════════════════════════
-    if (
-        plausibility_score < _HYDRO_MIN_PLAUSIBILITY
-        and risk_level != "SAFE"
-        and decision_source not in ("physical_override", "signal_override")
-    ):
-        risk_level = "SAFE"
-        trace.append(
-            f"[PLAUSIBILITY-GATE] plausibility={plausibility_score:.2f} < "
-            f"{_HYDRO_MIN_PLAUSIBILITY} — ML escalation suppressed, "
-            "SAFE retained (OOD inputs cannot drive confident flood prediction)"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # LAYER 4 — Trend & Plausibility Signals (trace-only; non-escalating)
-    # ═══════════════════════════════════════════════════════════════════════════
-    if risk_trend == "increasing":
-        trace.append(
-            f"[L4-TREND] Risk probability increasing "
-            f"(Δ={risk_delta:+.4f}, rate={rate_per_hour:+.4f}/hr) — heightened vigilance"
-        )
-        if risk_level == "WARNING" and decision_source == "ml_adaptive":
-            decision_source = "trend_informed"
-            trace.append(
-                "[L4-TREND] WARNING + increasing trend → "
-                "advise pre-emptive escalation readiness"
-            )
-    elif risk_trend == "decreasing" and risk_level != "SAFE":
-        trace.append(
-            f"[L4-TREND] Risk decreasing (Δ={risk_delta:+.4f}) — "
-            "conditions improving but current alert level maintained"
-        )
-
-    if anomaly_type:
-        anomaly_desc = (
-            "sudden probability spike — possible flash flood or dam release"
-            if anomaly_type == "spike"
-            else "sustained monotone increase — slow-developing flood accumulation"
-        )
-        trace.append(
-            f"[L4-TREND] Anomaly detected: {anomaly_type} — {anomaly_desc}"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Calibration Confidence Penalty
-    # ═══════════════════════════════════════════════════════════════════════════
-    calibration_penalty = 0.0
-    calibration_reason  = "No calibration data available — confidence unchanged"
-    calibration_applied = False
-
-    if calibration_ece > _ECE_PENALTY_THRESHOLD:
-        excess     = calibration_ece - _ECE_PENALTY_THRESHOLD
-        multiplier = max(_ECE_MIN_MULTIPLIER, 1.0 - excess * _ECE_PENALTY_SCALE)
-        original   = confidence
-        confidence = round(confidence * multiplier, 4)
-        calibration_penalty = round(original - confidence, 4)
-        calibration_reason  = (
-            f"ECE={calibration_ece:.3f} exceeds threshold {_ECE_PENALTY_THRESHOLD} — "
-            "model shows calibration overconfidence under current conditions"
-        )
-        calibration_applied = True
-        trace.append(
-            f"[CALIBRATION] ECE={calibration_ece:.3f} → confidence penalised "
-            f"by {calibration_penalty:.4f} (×{multiplier:.3f})"
-        )
-    else:
-        trace.append(
-            f"[CALIBRATION] ECE={calibration_ece:.3f} ≤ {_ECE_PENALTY_THRESHOLD} — "
-            "model calibration acceptable, no adjustment applied"
-        )
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # Cross-Layer Inconsistency Detection
-    # ═══════════════════════════════════════════════════════════════════════════
-    inconsistency_detected = False
-    inconsistency_reason   = ""
-
-    # Inconsistency check only runs on plausible data.
-    # If the input itself is OOD (plausibility < _HYDRO_MIN_PLAUSIBILITY), the
-    # physical signals (hydro_severity, wl_trend) come from the same implausible
-    # source and cannot be used to override a SAFE prediction. Applying the same
-    # threshold as the L1 physical override gate keeps these two checks consistent.
-    if risk_level == "SAFE" and plausibility_score >= _HYDRO_MIN_PLAUSIBILITY:
-        if hydro_severity >= _INCONSISTENCY_HYDRO_MIN:
-            inconsistency_detected = True
-            inconsistency_reason   = (
-                f"ML predicts SAFE but {hydro_dominant} is at "
-                f"{hydro_siaga.upper()} (severity={hydro_severity:.2f})"
-            )
-        elif risk_delta > _INCONSISTENCY_DELTA_MIN:
-            inconsistency_detected = True
-            inconsistency_reason   = (
-                "ML predicts SAFE but risk probability is strongly increasing "
-                f"(Δ={risk_delta:+.4f})"
-            )
-        elif wl_trend == "rising" and hydro_severity > 0.0:
-            inconsistency_detected = True
-            inconsistency_reason   = (
-                "ML predicts SAFE but water levels are rising "
-                "with non-zero hydrology severity"
-            )
-
-    if inconsistency_detected:
-        trace.append(f"[INCONSISTENCY] Detected: {inconsistency_reason}")
-        # Physical evidence contradicts ML SAFE — escalate rather than just log.
-        # risk_level is SAFE here (guaranteed by the outer check above).
-        risk_level      = "WARNING"
-        decision_source = "inconsistency_override"
-        trace.append(
-            "[INCONSISTENCY-OVERRIDE] Physical signal contradicts ML SAFE — "
-            "risk escalated to WARNING; manual verification required"
-        )
-
-    # Final trace entry
-    trace.append(
-        f"[FINAL] risk={risk_level}, confidence={confidence:.4f}, "
-        f"source={decision_source}"
+    physical = PhysicalSignals(
+        hydrology_max_severity=max(0.0, min(1.0, hydro_severity)),
+        rapid_escalation=rapid_escalation,
+        plausibility_score=max(0.0, min(1.0, plausibility_score)),
+        has_critical_violation=has_critical_violation,
     )
 
-    final_reason = _build_final_reason(
-        risk_level=risk_level,
-        decision_source=decision_source,
-        hydro_dominant=hydro_dominant,
-        hydro_siaga=hydro_siaga,
-        hydro_severity=hydro_severity,
-        system_status=system_status,
-        risk_trend=risk_trend,
-        anomaly_type=anomaly_type,
-        inconsistency_detected=inconsistency_detected,
-        calibration_applied=calibration_applied,
-        calibration_ece=calibration_ece,
+    # Real completeness/freshness from PerceptionAgent — L0 invalid-input gate
+    # (completeness < 0.30) and L2 DEGRADED escalation (freshness > 60 or
+    # completeness < 0.50) rely on these values, not the upstream hardcoded 1.0/0.0.
+    raw_completeness = kw.get("perception_completeness", 1.0)
+    try:
+        completeness = max(0.0, min(1.0, float(raw_completeness)))
+    except (TypeError, ValueError):
+        completeness = 1.0
+    raw_freshness = kw.get("data_freshness_minutes", 0.0)
+    try:
+        freshness_min = float(raw_freshness)
+    except (TypeError, ValueError):
+        freshness_min = -1.0  # unknown sentinel preserved
+
+    # Signals dict uses underscore-prefixed scalars (see decision_logic.extract_signals).
+    # Reading the non-prefixed keys previously zeroed rainfall_1h_mm and bmkg_max_severity
+    # in every call, making L1.5 COMPOUND_EVENT and rainfall/BMKG drivers unreachable.
+    rainfall_1h_mm = float(
+        signals.get("_rainfall_mm")
+        if signals.get("_rainfall_mm") is not None
+        else signals.get("rainfall_mm") or 0.0
     )
+    bmkg_max_severity = float(
+        signals.get("_bmkg_weighted")
+        if signals.get("_bmkg_weighted") is not None
+        else signals.get("bmkg_severity") or 0.0
+    )
+
+    perception = PerceptionInputs(
+        physically_plausible=not has_critical_violation,
+        completeness=completeness,
+        freshness_min=freshness_min,
+        max_water_level_ratio=max(0.0, station_ratio),
+        rainfall_1h_mm=rainfall_1h_mm,
+        bmkg_max_severity=max(0.0, min(1.0, bmkg_max_severity)),
+    )
+
+    reasoning = ReasoningInputs(
+        probability=float(kw.get("probability") or 0.0),
+        confidence=float(kw.get("adjusted_confidence") or 0.0),
+        model_variant="realtime_native",
+    )
+
+    failures: list[CanonicalFailureMode] = []
+    for f in kw.get("failure_modes") or []:
+        if not isinstance(f, dict):
+            continue
+        sev_raw = str(f.get("severity") or "low").lower()
+        sev = _FAILURE_SEVERITY_NORMALIZE.get(sev_raw, FailureSeverity.LOW)
+        failures.append(
+            CanonicalFailureMode(
+                failure_type=str(f.get("type") or "unknown"),
+                severity=sev,
+                risk_escalation=bool(f.get("risk_escalation", False)),
+                confidence_penalty=float(f.get("confidence_penalty") or 0.0),
+            )
+        )
+
+    trend = TrendSnapshot(
+        recent_probabilities=tuple(trend_state.get("recent_probabilities") or ()),
+        risk_trend=str(trend_state.get("risk_trend") or ""),
+        trend_strength=float(trend_state.get("trend_strength") or 0.0),
+        trend_confidence=float(trend_state.get("trend_confidence") or 0.0),
+        rainfall_acc_3h=float(trend_state.get("rainfall_acc_3h") or 0.0),
+        water_level_delta_cur=float(trend_state.get("water_level_delta_cur") or 0.0),
+        data_points=int(trend_state.get("data_points") or 0),
+    )
+
+    # Threshold source unification: when adaptive_classification is absent
+    # (failsafe path, plausibility bypass, etc.), fall back to the SAME triplet
+    # the realtime inference layer uses. Prevents /predict/realtime-native and
+    # /predict/agentic from disagreeing on borderline probabilities.
+    _canon_pre, _canon_warn, _canon_danger = _canonical_default_thresholds()
+
+    normalized_thresholds = derive_threshold_triplet(
+        danger=float(
+            ac.get("danger_threshold")
+            or ac.get("effective_danger_threshold")
+            or _canon_danger
+        ),
+        warning=_optional_float(ac.get("warning_threshold")) if ac else _canon_warn,
+        pre_alert=_optional_float(ac.get("pre_alert_threshold")) if ac else _canon_pre,
+    )
+    thresholds = AdaptiveThresholds(
+        pre_alert=normalized_thresholds["pre_alert"],
+        warning=normalized_thresholds["warning"],
+        danger=normalized_thresholds["danger"],
+    )
+
+    return {
+        "perception": perception,
+        "reasoning": reasoning,
+        "failures": failures,
+        "trend": trend,
+        "thresholds": thresholds,
+        "physical": physical,
+    }
+
+
+def _decision_to_legacy_result(decision, kw: dict) -> "DecisionResult":
+    """
+    Map a canonical Decision into the legacy DecisionResult shape that
+    ActionAgent and tests already consume.
+
+    Canonical passthrough (Phase G): risk_level from decide() is passed through
+    unchanged. The Inv-6 UNKNOWN → WARNING rewrite has been removed — L0 UNKNOWN
+    now reaches callers directly. All downstream consumers handle UNKNOWN via
+    their existing default branches. system_status=FAIL is the authoritative
+    invalid-input indicator.
+    """
+    decision_source = _AUTHORITY_TO_SOURCE.get(decision.authority, "ml_adaptive")
+    risk_for_result = decision.risk_level
+
+    # Convert canonical decision_trace (tuple[dict]) into legacy list[str]
+    trace_strings: list[str] = []
+    for entry in decision.decision_trace:
+        layer = entry.get("layer", "?")
+        outputs = entry.get("outputs", {})
+        risk_after = outputs.get("risk_after") or outputs.get("risk") or ""
+        override = outputs.get("override")
+        marker = f"[{layer}]"
+        if override:
+            marker += f" override={override}"
+        if risk_after:
+            marker += f" -> {risk_after}"
+        trace_strings.append(marker)
+
+    # override_trace: assemble from any L1/L1.5/L2 canonical entries.
+    physical_layers = {"L1_SIAGA", "L1_5_MULTI", "L2_INTEGRITY"}
+    override_entries = [
+        t for t in decision.decision_trace if t.get("layer") in physical_layers
+    ]
+    physical_override = bool(override_entries)
+    last_override = override_entries[-1] if override_entries else None
+    override_reason = ""
+    if last_override:
+        outputs = last_override.get("outputs", {})
+        override_reason = outputs.get("override") or outputs.get("driver") or ""
+
+    physical = kw.get("hydrology_assessment")
+    hydro_severity = (
+        float(getattr(physical, "max_severity", 0.0) or 0.0) if physical else 0.0
+    )
+    hydro_dominant = (
+        str(getattr(physical, "dominant_station", "") or "") if physical else ""
+    )
+    hydro_siaga = (
+        str(getattr(physical, "dominant_siaga", "") or "") if physical else ""
+    )
+
+    # ECE logging (deactivated per RC-1 — penalty is always 0.0)
+    cached_ece = kw.get("calibration_ece")
+    if cached_ece is None:
+        cached_ece = _load_cached_ece()
+    cached_ece = float(cached_ece or 0.0)
+
+    trace_struct = [
+        {
+            "step": idx + 1,
+            "agent": "decision_engine",
+            "event": str(entry.get("layer", "")),
+            "outcome": entry.get("outputs", {}).get("risk_after")
+            or entry.get("outputs", {}).get("risk")
+            or "",
+            "confidence": round(decision.confidence, 4),
+            "data": dict(entry),
+        }
+        for idx, entry in enumerate(decision.decision_trace)
+    ]
 
     return DecisionResult(
-        risk_level=risk_level,
-        confidence_score=round(confidence, 4),
+        risk_level=risk_for_result.value,
+        confidence_score=round(decision.confidence, 4),
+        # Phase 5: canonical SystemStatus surfaced so callers can compare
+        # against the agent's independently-computed system_status.
+        system_status=decision.system_status.value,
         decision_source=decision_source,
-        decision_trace=trace,
-        decision_summary=_build_decision_summary(
-            risk_level, decision_source, confidence, system_status,
-            hydro_dominant, hydro_siaga,
+        decision_trace=trace_strings,
+        decision_trace_struct=trace_struct,
+        decision_summary=(
+            f"{risk_for_result.value} via {decision_source} "
+            f"(authority={decision.authority.value}, "
+            f"driver={decision.driver.value}, "
+            f"confidence={decision.confidence:.2f})"
         ),
-        final_reason=final_reason,
+        final_reason=(
+            f"{risk_for_result.value} — {decision.reason.value} "
+            f"(authority={decision.authority.value})"
+        ),
         override_trace={
             "triggered": physical_override,
-            "reason": override_reason if physical_override else "",
-            "confidence": override_confidence if physical_override else "n/a",
+            "reason": override_reason,
+            "confidence": decision.confidence if physical_override else "n/a",
             "hydrology_severity": round(hydro_severity, 4),
             "dominant_station": hydro_dominant,
             "dominant_siaga": hydro_siaga,
+            "authority": decision.authority.value,
         },
         inconsistency_check={
-            "detected": inconsistency_detected,
-            "reason": inconsistency_reason if inconsistency_detected else "",
+            "detected": (
+                decision.authority == DecisionAuthority.L2_INTEGRITY
+                and last_override is not None
+                and last_override.get("outputs", {}).get("override") == "inconsistency"
+            ),
+            "reason": (
+                "ML SAFE contradicted by physical hydrology evidence"
+                if decision.authority == DecisionAuthority.L2_INTEGRITY
+                and last_override is not None
+                and last_override.get("outputs", {}).get("override") == "inconsistency"
+                else ""
+            ),
         },
         confidence_adjustment={
-            "calibration_penalty": round(calibration_penalty, 4),
-            "calibration_ece": round(calibration_ece, 4),
-            "applied": calibration_applied,
-            "reason": calibration_reason,
-            "final_confidence": round(confidence, 4),
+            "calibration_penalty": 0.0,                # RC-1 deactivated
+            "calibration_ece": round(cached_ece, 4),
+            "applied": False,                          # RC-1 deactivated
+            "reason": "calibration penalty deactivated (RC-1)",
+            "final_confidence": round(decision.confidence, 4),
         },
-        adaptive_threshold=_format_adaptive_threshold(adaptive_classification),
-        hydrology_narrative=_build_hydrology_narrative(
-            hydro_expl, hydro_stations, trend_state
-        ),
-        scenario_comparison=_build_scenario_comparison(
-            confidence, raw_model_confidence, baseline_result
-        ),
+        adaptive_threshold=_format_adaptive_threshold(kw.get("adaptive_classification")),
+        hydrology_narrative="",                        # legacy narrative deferred
+        scenario_comparison={},                         # cosmetic metric removed
     )
 
 
@@ -625,21 +629,43 @@ def _build_decision_summary(
 
 
 def _format_adaptive_threshold(adaptive_cls: dict | None) -> dict:
+    _pre, _warn, _dng = _canonical_default_thresholds()
     if not adaptive_cls:
         return {
-            "danger_threshold": 0.45,
-            "base_threshold": 0.45,
+            "pre_alert_threshold": _pre,
+            "warning_threshold": _warn,
+            "danger_threshold": _dng,
+            "base_threshold": _dng,
             "net_adjustment": 0.0,
             "adjustment_factors": [],
+            "threshold_basis": (
+                "Default static thresholds - no context adjustments applied. "
+                "Final risk classification is delegated to app.domain.decision.decide()."
+            ),
             "classification_basis": "Default static threshold — no context signals available",
         }
+    normalized = derive_threshold_triplet(
+        danger=float(
+            adaptive_cls.get("danger_threshold")
+            or adaptive_cls.get("effective_danger_threshold")
+            or _dng
+        ),
+        warning=_optional_float(adaptive_cls.get("warning_threshold")),
+        pre_alert=_optional_float(adaptive_cls.get("pre_alert_threshold")),
+    )
+    threshold_basis = adaptive_cls.get("threshold_basis") or adaptive_cls.get("classification_basis", "")
     return {
-        "danger_threshold": adaptive_cls.get("effective_danger_threshold", 0.45),
-        "base_threshold": adaptive_cls.get("base_danger_threshold", 0.45),
+        "pre_alert_threshold": normalized["pre_alert"],
+        "warning_threshold": normalized["warning"],
+        "danger_threshold": normalized["danger"],
+        "base_threshold": adaptive_cls.get("base_danger_threshold", _dng),
         "net_adjustment": float(adaptive_cls.get("net_adjustment", 0.0)),
         "adjustment_factors": [
             a.get("reason", "") for a in adaptive_cls.get("adjustments", [])
         ],
+        "threshold_basis": threshold_basis,
+        "calibration_version": adaptive_cls.get("calibration_version", ""),
+        "calibration_source": adaptive_cls.get("calibration_source", ""),
         "classification_basis": adaptive_cls.get("classification_basis", ""),
     }
 
@@ -675,6 +701,96 @@ def _build_hydrology_narrative(
         )
 
     return " ".join(parts)
+
+
+def _optional_float(value: object) -> float | None:
+    if value in ("", None):
+        return None
+    return float(value)
+
+
+def _apply_elevation_adjustment(base_risk: str, elevation_data: dict) -> tuple[str, float, str]:
+    """
+    Apply conservative, additive elevation rules.
+
+    Returns:
+      (adjusted_risk, threshold_delta, reason)
+
+    ``threshold_delta`` is informational here: positive values mean "be more
+    sensitive to escalation", negative values mean "slight relaxation". Risk
+    is never downgraded, and WARNING/DANGER are never reduced.
+    """
+    if not isinstance(elevation_data, dict) or not elevation_data:
+        return base_risk, 0.0, ""
+
+    elevation_m = elevation_data.get("elevation_m")
+    try:
+        elevation_m = float(elevation_m) if elevation_m is not None else None
+    except (TypeError, ValueError):
+        elevation_m = None
+
+    rainfall_1h = _coerce_non_negative_float(elevation_data.get("rainfall_1h_mm"))
+    rainfall_3h = _coerce_non_negative_float(elevation_data.get("rainfall_3h_mm"))
+    water_level_delta = _coerce_non_negative_float(elevation_data.get("water_level_delta"))
+    is_local_depression = bool(elevation_data.get("is_local_depression", False))
+
+    threshold_delta = 0.0
+    reasons: list[str] = []
+    adjusted_risk = base_risk
+
+    has_any_rainfall = rainfall_1h > 0.0 or rainfall_3h > 0.0
+    heavy_rainfall = rainfall_1h >= 20.0 or rainfall_3h >= 60.0
+    rising_water = water_level_delta > 0.0
+
+    if elevation_m is not None and elevation_m < 0.0 and has_any_rainfall and base_risk == "SAFE":
+        adjusted_risk = "PRE_ALERT"
+        reasons.append("below sea level with active rainfall")
+
+    if elevation_m is not None and 0.0 <= elevation_m <= 2.0 and heavy_rainfall:
+        adjusted_risk = _escalate_risk_level(adjusted_risk)
+        reasons.append("0-2 m elevation under heavy rainfall")
+
+    if is_local_depression and rising_water:
+        threshold_delta += 0.05
+        reasons.append("local depression with rising water")
+
+    if elevation_m is not None and elevation_m > 10.0:
+        threshold_delta -= 0.01
+        reasons.append("elevation above 10 m")
+
+    if base_risk in ("WARNING", "DANGER") and _risk_rank(adjusted_risk) < _risk_rank(base_risk):
+        adjusted_risk = base_risk
+
+    return adjusted_risk, round(threshold_delta, 4), "; ".join(reasons)
+
+
+def _coerce_non_negative_float(value: object) -> float:
+    try:
+        coerced = float(value) if value is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+    return max(0.0, coerced)
+
+
+def _risk_rank(risk_level: str) -> int:
+    return {
+        "UNKNOWN": 0,
+        "SAFE": 1,
+        "PRE_ALERT": 2,
+        "WARNING": 3,
+        "DANGER": 4,
+    }.get(str(risk_level or "").upper(), 0)
+
+
+def _escalate_risk_level(risk_level: str) -> str:
+    normalized = str(risk_level or "").upper()
+    if normalized == "SAFE":
+        return "PRE_ALERT"
+    if normalized == "PRE_ALERT":
+        return "WARNING"
+    if normalized == "WARNING":
+        return "DANGER"
+    return "DANGER" if normalized == "DANGER" else risk_level
 
 
 def _build_scenario_comparison(
@@ -787,11 +903,24 @@ def failsafe_decision(
     # mid-escalation, so the pre-crash risk could be lower than the true answer.
     # DANGER is preserved (already the highest level). WARNING and SAFE both become WARNING.
     _failsafe_risk = "DANGER" if evaluation_risk_level == "DANGER" else "WARNING"
+    _failsafe_conf = round(min(float(adjusted_confidence), 0.5), 4)
     return DecisionResult(
         risk_level=_failsafe_risk,
-        confidence_score=min(float(adjusted_confidence), 0.5),
+        confidence_score=_failsafe_conf,
+        # Failsafe path is by definition degraded — never leak an empty status
+        # downstream. Empty would let EvaluationAgent retain its agent-computed
+        # status (possibly OK), masking the engine failure.
+        system_status="DEGRADED",
         decision_source="system_guardrail",
         decision_trace=[f"[FAILSAFE] {reason}"],
+        decision_trace_struct=[{
+            "step": 1,
+            "agent": "decision_engine",
+            "event": "failsafe",
+            "outcome": _failsafe_risk,
+            "confidence": _failsafe_conf,
+            "data": {"reason": reason},
+        }],
         decision_summary=(
             "Decision engine encountered an internal error — "
             "conservative risk classification applied. Manual review required."
@@ -799,15 +928,94 @@ def failsafe_decision(
         final_reason=reason,
         override_trace={"triggered": False, "reason": reason, "confidence": "n/a"},
         inconsistency_check={"detected": False, "reason": ""},
-        confidence_adjustment={"applied": False, "reason": reason},
-        adaptive_threshold={},
+        # Schema-aligned with healthy-path _decision_to_legacy_result so
+        # consumers keying on `calibration_penalty` / `calibration_ece` /
+        # `final_confidence` do not KeyError on the failsafe path.
+        confidence_adjustment={
+            "calibration_penalty": 0.0,
+            "calibration_ece": 0.0,
+            "applied": False,
+            "reason": reason,
+            "final_confidence": _failsafe_conf,
+        },
+        adaptive_threshold=_format_adaptive_threshold(None),
         hydrology_narrative="",
         scenario_comparison={},
     )
 
 
+# ─── Shadow threshold evaluation (DATA-2) ────────────────────────────────────
+
+_SHADOW_WARNING_THRESHOLD: float = 0.12
+_SHADOW_DANGER_THRESHOLD: float = 0.22
+_SHADOW_PROFILE_NAME: str = "conservative"
+
+# Production baselines used only for computing threshold_delta in the log.
+_PROD_WARNING_THRESHOLD: float = 0.26
+_PROD_DANGER_THRESHOLD: float = 0.36
+
+
+def compute_shadow_evaluation(
+    probability: float,
+    *,
+    production_risk_level: str,
+    evaluated_at: str | None = None,
+) -> dict:
+    """
+    Compute shadow threshold evaluation using conservative thresholds.
+
+    Pure function — never reads or modifies any production decision field.
+    Returns a dict for inclusion in the pipeline output payload under
+    "shadow_evaluation". Pass evaluated_at for deterministic replay; when
+    omitted, the current UTC time is used.
+    """
+    p = float(probability)
+    shadow_danger = p >= _SHADOW_DANGER_THRESHOLD
+    shadow_warning = p >= _SHADOW_WARNING_THRESHOLD
+
+    if shadow_danger:
+        shadow_risk = "DANGER"
+    elif shadow_warning:
+        shadow_risk = "WARNING"
+    else:
+        shadow_risk = "SAFE"
+
+    ts = evaluated_at or datetime.now(timezone.utc).isoformat()
+    delta_warning = round(_PROD_WARNING_THRESHOLD - _SHADOW_WARNING_THRESHOLD, 4)
+    delta_danger = round(_PROD_DANGER_THRESHOLD - _SHADOW_DANGER_THRESHOLD, 4)
+
+    _log.info(
+        "shadow_eval current_decision=%s shadow_decision=%s probability=%.4f "
+        "threshold_delta_warning=%.4f threshold_delta_danger=%.4f",
+        production_risk_level,
+        shadow_risk,
+        p,
+        delta_warning,
+        delta_danger,
+    )
+
+    return {
+        "shadow_warning_triggered": shadow_warning,
+        "shadow_danger_triggered": shadow_danger,
+        "shadow_probability": round(p, 4),
+        "shadow_risk_level": shadow_risk,
+        "shadow_threshold_profile": _SHADOW_PROFILE_NAME,
+        "shadow_warning_threshold": _SHADOW_WARNING_THRESHOLD,
+        "shadow_danger_threshold": _SHADOW_DANGER_THRESHOLD,
+        "production_risk_level": production_risk_level,
+        "threshold_delta_warning": delta_warning,
+        "threshold_delta_danger": delta_danger,
+        "evaluated_at": ts,
+    }
+
+
 def write_calibration_cache(
-    ece: float, brier: float = 0.0, n: int = 0, model_version: str = "unknown"
+    ece: float,
+    brier: float = 0.0,
+    n: int = 0,
+    model_version: str = "unknown",
+    *,
+    now: "datetime | None" = None,
 ) -> None:
     """
     Persist the latest ECE so the decision engine can apply a runtime confidence
@@ -818,17 +1026,26 @@ def write_calibration_cache(
     """
     try:
         os.makedirs(os.path.dirname(_CALIBRATION_CACHE), exist_ok=True)
-        with open(_CALIBRATION_CACHE, "w", encoding="utf-8") as fh:
+        tmp_path = _CALIBRATION_CACHE + ".tmp"
+        ts = now if now is not None else datetime.now(timezone.utc)
+        with open(tmp_path, "w", encoding="utf-8") as fh:
             json.dump(
                 {
                     "ece": round(ece, 6),
                     "brier": round(brier, 6),
                     "n": n,
                     "model_version": model_version,
-                    "written_at": datetime.now(timezone.utc).isoformat(),
+                    "written_at": ts.isoformat(),
                 },
                 fh,
             )
-        _load_cached_ece.cache_clear()
+            fh.flush()
+            try:
+                os.fsync(fh.fileno())
+            except OSError:
+                pass
+        # Atomic on POSIX; Windows os.replace replaces an existing target atomically.
+        os.replace(tmp_path, _CALIBRATION_CACHE)
+        _load_cached_ece_for_mtime.cache_clear()
     except OSError:
         pass

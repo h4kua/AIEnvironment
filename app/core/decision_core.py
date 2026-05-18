@@ -28,8 +28,10 @@ if TYPE_CHECKING:
 
 # ─── Constants ────────────────────────────────────────────────────────────────
 
-# When uncertainty_score exceeds this, EvaluationAgent sets requires_manual_review.
-# DecisionCore only computes the flag — EvaluationAgent acts on it.
+# SOLE BEHAVIORAL HOOK in this module: when uncertainty_score exceeds this
+# threshold, EvaluationAgent._requires_manual_review() returns True.
+# This is the ONLY output of DecisionCore that influences pipeline behavior.
+# It does NOT affect risk_level, system_status, or probability.
 UNCERTAINTY_MANUAL_REVIEW_THRESHOLD = 0.65
 
 # Composite weights — EXPLAINABILITY ONLY, never used in decision logic.
@@ -100,16 +102,20 @@ class RiskState:
 # RiskState → ActionAgent explainability output and consistency trace notes.
 class DecisionCore:
     """
-    Signal aggregation layer — NOT a decision maker.
+    NON-AUTHORITATIVE — explainability decoration only.
+
+    Signal aggregation layer — NOT a decision maker. Final risk_level and
+    system_status are determined exclusively by app.domain.decision.decide().
 
     build_state() normalises raw sensor/model signals into a RiskState.
     Callers use RiskState for:
       - Explainability output in the final decision report
-      - Consistency notes (high hazard + SAFE -> informational trace entry)
+      - Consistency notes (high hazard + SAFE -> informational trace entry, no mutation)
       - Uncertainty-based manual review flagging via uncertainty_score
+        (the ONLY behavioral output — see UNCERTAINTY_MANUAL_REVIEW_THRESHOLD)
 
     Called by EvaluationAgent after the decision engine runs, so override_trace
-    is available. Produces the authoritative risk_state attached to EvaluationResult.
+    is available. Produces the non-authoritative risk_state attached to EvaluationResult.
 
     All parameters are keyword-only to prevent positional misuse.
     """

@@ -6,23 +6,254 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+import logging
+import math
+import random
+import time
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, Mapping, Optional
+from enum import Enum
+from typing import Any, Callable, Dict, Mapping, Optional, TypeVar
 from uuid import UUID
 
+import psycopg2
 from psycopg2.extras import Json, register_uuid
 from psycopg2.extensions import connection as PgConnection
 
 from db.psycopg2_connection import (
     Psycopg2ConnectionConfig,
-    get_psycopg2_connection,
+    pooled_connection,
 )
+from app.api.observability import DB_RETRY_TOTAL
 
 register_uuid()
 
-ALLOWED_RISK_LEVELS = frozenset({"SAFE", "WARNING", "DANGER"})
+logger = logging.getLogger("pipeline")
+
+_T = TypeVar("_T")
+
+
+class PipelineError(Exception):
+    """Base class for pipeline writer failures."""
+
+
+class ValidationError(PipelineError, ValueError):
+    """Raised when payload validation fails before any DB interaction."""
+
+
+class DatabaseError(PipelineError):
+    """Raised when a database operation fails after retries are exhausted."""
+
+
+_RETRYABLE_DB_ERRORS = (psycopg2.OperationalError, psycopg2.InterfaceError)
+
+
+def with_retry(
+    fn: Callable[[], _T],
+    max_attempts: int = 3,
+    backoff: float = 0.5,
+) -> _T:
+    """
+    Execute ``fn`` and retry on transient psycopg2 connectivity failures.
+
+    Retries only on ``OperationalError`` and ``InterfaceError`` (e.g. dropped
+    connections). Uses exponential backoff: ``sleep = backoff * (2 ** attempt)``.
+    On exhaustion, raises ``DatabaseError`` chained from the last exception.
+    """
+    if max_attempts < 1:
+        raise ValidationError("max_attempts must be >= 1")
+    last_exc: Optional[BaseException] = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except _RETRYABLE_DB_ERRORS as exc:
+            last_exc = exc
+            if attempt + 1 >= max_attempts:
+                break
+            sleep_for = min(8.0, backoff * (2 ** attempt) * random.uniform(0.7, 1.3))
+            DB_RETRY_TOTAL.labels("retry").inc()
+            logger.warning(
+                "stage=db.retry attempt=%d/%d backoff=%.2fs error_type=%s error=%s",
+                attempt + 1,
+                max_attempts,
+                sleep_for,
+                type(exc).__name__,
+                exc,
+            )
+            time.sleep(sleep_for)
+    DB_RETRY_TOTAL.labels("exhausted").inc()
+    raise DatabaseError(
+        "DB operation failed after {0} attempts".format(max_attempts)
+    ) from last_exc
+
+# IMPORTANT: SystemStatus and RiskLevel values MUST match the PostgreSQL CHECK
+# constraints on the corresponding columns (system_status, risk_level) in
+# evaluation_results, decisions, and pipeline_runs. If you change a value here,
+# you MUST also update the database CHECK constraint in the matching migration.
+# This module is the single source of truth.
+# Canonical vocabulary — kept in sync with app/contracts/vocabulary.py and the
+# DB CHECKs in db/migrations/100_vocabulary_sync.sql. The migration generator
+# (scripts/generate_check_constraints.py, planned) will reflect the contracts
+# enum into a fresh 100_vocabulary_sync.sql on every change. Until then, this
+# block, app/contracts/vocabulary.py, and 100_vocabulary_sync.sql must be
+# edited together.
+class SystemStatus(str, Enum):
+    OK = "OK"
+    DEGRADED = "DEGRADED"
+    LOW_TRUST = "LOW_TRUST"
+    CONFLICT = "CONFLICT"
+    FAIL = "FAIL"
+    PIPELINE_FAILURE = "PIPELINE_FAILURE"
+
+
+class RiskLevel(str, Enum):
+    SAFE = "SAFE"
+    PRE_ALERT = "PRE_ALERT"
+    WARNING = "WARNING"
+    DANGER = "DANGER"
+    UNKNOWN = "UNKNOWN"
+
+
+STATUS_ALIASES: Mapping[str, SystemStatus] = {
+    # Canonical (identity) entries — every SystemStatus value normalizes to itself.
+    "OK": SystemStatus.OK,
+    "DEGRADED": SystemStatus.DEGRADED,
+    "LOW_TRUST": SystemStatus.LOW_TRUST,
+    "CONFLICT": SystemStatus.CONFLICT,
+    "FAIL": SystemStatus.FAIL,
+    "PIPELINE_FAILURE": SystemStatus.PIPELINE_FAILURE,
+    # Legacy aliases preserved for backward compatibility.
+    "READY": SystemStatus.OK,
+    "SUCCESS": SystemStatus.OK,
+    "RUNNING": SystemStatus.DEGRADED,
+    "ERROR": SystemStatus.FAIL,
+    "FAILED": SystemStatus.FAIL,
+}
+
+
+RISK_LEVEL_ALIASES: Mapping[str, RiskLevel] = {
+    # Canonical (identity) entries — every RiskLevel value normalizes to itself.
+    "SAFE": RiskLevel.SAFE,
+    "PRE_ALERT": RiskLevel.PRE_ALERT,
+    "WARNING": RiskLevel.WARNING,
+    "DANGER": RiskLevel.DANGER,
+    "UNKNOWN": RiskLevel.UNKNOWN,
+    # Legacy aliases preserved for backward compatibility.
+    "OK": RiskLevel.SAFE,
+    "LOW": RiskLevel.SAFE,
+    "MEDIUM": RiskLevel.WARNING,
+    "WARN": RiskLevel.WARNING,
+    "WATCH": RiskLevel.PRE_ALERT,
+    "HIGH": RiskLevel.DANGER,
+    "CRITICAL": RiskLevel.DANGER,
+}
+
+
+def normalize_status(status: str) -> SystemStatus:
+    """
+    Normalize an incoming system_status string into a SystemStatus enum.
+
+    Mapping: READY/SUCCESS -> OK, RUNNING -> DEGRADED, ERROR/FAILED -> FAIL.
+    Already-valid values pass through. Unknown values raise ValidationError.
+    """
+    if not isinstance(status, str):
+        raise ValidationError(
+            "system_status must be a string; received {0!r}".format(
+                type(status).__name__
+            )
+        )
+
+    normalized = STATUS_ALIASES.get(status.strip().upper())
+    if normalized is None:
+        raise ValidationError(
+            "Unknown system_status {0!r}; expected one of {1}".format(
+                status, [s.value for s in SystemStatus]
+            )
+        )
+
+    logger.debug("[STATUS] raw=%s normalized=%s", status, normalized.value)
+    return normalized
+
+
+def normalize_risk_level(value: str) -> RiskLevel:
+    """
+    Normalize an incoming risk_level string into a RiskLevel enum.
+
+    Aliases: LOW -> SAFE, MEDIUM/WARN -> WARNING, HIGH/CRITICAL -> DANGER.
+    Already-valid values pass through. Unknown values raise ValidationError.
+    """
+    if not isinstance(value, str):
+        raise ValidationError(
+            "risk_level must be a string; received {0!r}".format(
+                type(value).__name__
+            )
+        )
+
+    normalized = RISK_LEVEL_ALIASES.get(value.strip().upper())
+    if normalized is None:
+        raise ValidationError(
+            "Unknown risk_level {0!r}; expected one of {1}".format(
+                value, [r.value for r in RiskLevel]
+            )
+        )
+
+    logger.debug("[RISK] raw=%s normalized=%s", value, normalized.value)
+    return normalized
+
+
+def _require_unit_interval(value: float, field_name: str) -> float:
+    if value is None:
+        raise ValidationError("{0} is required".format(field_name))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValidationError(
+            "{0} must be numeric; received {1!r}".format(field_name, type(value).__name__)
+        )
+    if not 0.0 <= float(value) <= 1.0:
+        raise ValidationError(
+            "{0} must be in [0, 1]; received {1!r}".format(field_name, value)
+        )
+    return float(value)
+
+
+def _require_non_negative(value: float, field_name: str) -> float:
+    if value is None:
+        raise ValidationError("{0} is required".format(field_name))
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        raise ValidationError(
+            "{0} must be numeric; received {1!r}".format(field_name, type(value).__name__)
+        )
+    if float(value) < 0.0:
+        raise ValidationError(
+            "{0} must be >= 0; received {1!r}".format(field_name, value)
+        )
+    return float(value)
+
+
+def _require_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValidationError(
+            "{0} must be a bool; received {1!r}".format(field_name, type(value).__name__)
+        )
+    return value
+
+
+def _require_non_empty_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ValidationError(
+            "{0} must be a non-empty string; received {1!r}".format(field_name, value)
+        )
+    return value
+
+
+def _require_mapping(value: Any, field_name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValidationError(
+            "{0} must be a mapping; received {1!r}".format(
+                field_name, type(value).__name__
+            )
+        )
+    return value
 
 
 @dataclass(frozen=True)
@@ -95,6 +326,61 @@ class PipelineExecutionResult:
         }
 
 
+def validate_perception_payload(payload: PerceptionPayload) -> PerceptionPayload:
+    """Validate a PerceptionPayload. Returns a safe instance or raises ValidationError."""
+    _require_non_negative(payload.data_freshness_minutes, "perception.data_freshness_minutes")
+    _require_unit_interval(payload.snapshot_completeness, "perception.snapshot_completeness")
+    _require_mapping(payload.signal_presence, "perception.signal_presence")
+    return payload
+
+
+def validate_reasoning_payload(payload: ReasoningPayload) -> ReasoningPayload:
+    """Validate a ReasoningPayload. Returns a safe instance or raises ValidationError."""
+    _require_unit_interval(payload.probability, "reasoning.probability")
+    _require_unit_interval(payload.confidence_score, "reasoning.confidence_score")
+    if payload.model_variant is not None and not isinstance(payload.model_variant, str):
+        raise ValidationError(
+            "reasoning.model_variant must be a string or None; received {0!r}".format(
+                type(payload.model_variant).__name__
+            )
+        )
+    return payload
+
+
+def validate_evaluation_payload(payload: EvaluationPayload) -> EvaluationPayload:
+    """
+    Validate and normalize an EvaluationPayload.
+
+    Returns a new payload with system_status and risk_level normalized to their
+    enum form. Raises ValidationError on any invalid field.
+    """
+    status = normalize_status(payload.system_status)
+    risk = normalize_risk_level(payload.risk_level)
+    _require_unit_interval(payload.probability, "evaluation.probability")
+    _require_unit_interval(payload.confidence_score, "evaluation.confidence_score")
+    _require_bool(payload.requires_manual_review, "evaluation.requires_manual_review")
+    return replace(payload, system_status=status, risk_level=risk)
+
+
+def validate_decision_payload(payload: DecisionPayload) -> DecisionPayload:
+    """
+    Validate and normalize a DecisionPayload.
+
+    Returns a new payload with system_status and risk_level normalized to their
+    enum form. Raises ValidationError on any invalid field.
+    """
+    status = normalize_status(payload.system_status)
+    risk = normalize_risk_level(payload.risk_level)
+    _require_unit_interval(payload.probability, "decision.probability")
+    _require_unit_interval(payload.confidence_score, "decision.confidence_score")
+    _require_bool(payload.requires_manual_review, "decision.requires_manual_review")
+    _require_bool(payload.is_safe_for_automation, "decision.is_safe_for_automation")
+    _require_non_empty_str(payload.decision_reason, "decision.decision_reason")
+    _require_non_empty_str(payload.data_validity, "decision.data_validity")
+    _require_non_empty_str(payload.ml_execution_mode, "decision.ml_execution_mode")
+    return replace(payload, system_status=status, risk_level=risk)
+
+
 def execute_pipeline(
     snapshot_input: Mapping[str, Any],
     location: Optional[str],
@@ -105,108 +391,319 @@ def execute_pipeline(
     pipeline_run: Optional[PipelineRunConfig] = None,
     connection: Optional[PgConnection] = None,
     db_config: Optional[Psycopg2ConnectionConfig] = None,
+    now: Optional[datetime] = None,
 ) -> PipelineExecutionResult:
     """
-    Persist one complete pipeline execution in a single database transaction.
+    Persist one complete pipeline execution in a single retry-safe transaction.
 
-    The stage order is mandatory and enforced:
-    snapshot -> pipeline_run -> perception -> reasoning -> evaluation -> decision
+    Order of operations:
+      1. Pre-flight validation (no DB interaction)
+      2. Open connection + transaction (retry-wrapped on transient faults)
+      3. Insert all stages in mandatory order
+      4. Commit on success; rollback + close on any failure
+
+    Raises:
+      ValidationError: any payload field invalid (raised BEFORE the DB is touched)
+      DatabaseError:   any psycopg2 failure (transient retries exhausted, or
+                       non-retryable DB error wrapped with original context)
     """
-    _validate_risk_level(evaluation.risk_level, field_name="evaluation.risk_level")
-    _validate_risk_level(decision.risk_level, field_name="decision.risk_level")
+    if not isinstance(snapshot_input, Mapping):
+        raise ValidationError("snapshot_input must be a mapping")
+    if location is not None and not isinstance(location, str):
+        raise ValidationError("location must be a string or None")
 
-    owns_connection = connection is None
-    active_connection = connection or get_psycopg2_connection(db_config)
+    perception = validate_perception_payload(perception)
+    reasoning = validate_reasoning_payload(reasoning)
+    evaluation = validate_evaluation_payload(evaluation)
+    decision = validate_decision_payload(decision)
+
     run_config = pipeline_run or PipelineRunConfig()
-    transaction_started_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    # Single deterministic clock for this persistence call. When the orchestrator
+    # injects ``now``, every row stamped here (snapshot.fetched_at_utc, decision
+    # timestamp, pipeline_runs.completed_at) uses the same value so replays of
+    # the same snapshot produce identical timestamp columns.
+    pinned_now: datetime = now if now is not None else datetime.now(timezone.utc)
 
-    try:
-        with active_connection.cursor() as cursor:
-            snapshot_id = create_snapshot(
-                cursor=cursor,
-                snapshot_input=snapshot_input,
-                location=location,
-            )
-            pipeline_run_id = create_pipeline_run(
-                cursor=cursor,
-                snapshot_id=snapshot_id,
-                pipeline_run=run_config,
-            )
-            perception_id = insert_perception(
-                cursor=cursor,
-                snapshot_id=snapshot_id,
-                pipeline_run_id=pipeline_run_id,
-                perception=perception,
-            )
-            reasoning_id = insert_reasoning(
-                cursor=cursor,
-                perception_id=perception_id,
-                pipeline_run_id=pipeline_run_id,
-                reasoning=reasoning,
-            )
-            evaluation_id = insert_evaluation(
-                cursor=cursor,
-                reasoning_id=reasoning_id,
-                perception_id=perception_id,
-                pipeline_run_id=pipeline_run_id,
-                evaluation=evaluation,
-            )
-            decision_id = insert_decision(
-                cursor=cursor,
-                evaluation_id=evaluation_id,
-                pipeline_run_id=pipeline_run_id,
-                decision=decision,
-            )
-            _finalize_pipeline_run(
-                cursor=cursor,
-                pipeline_run_id=pipeline_run_id,
-                decision=decision,
-                run_config=run_config,
-                decision_id=decision_id,
-                transaction_started_at=transaction_started_at,
-            )
+    # Track attempts so the FIRST attempt may use a caller-provided connection,
+    # but every retry MUST acquire a fresh connection — a connection that hit a
+    # transient DB error is presumed broken and must never be reused.
+    state = {"attempt": 0}
 
-        active_connection.commit()
-        return PipelineExecutionResult(
+    def _attempt() -> PipelineExecutionResult:
+        state["attempt"] += 1
+        if state["attempt"] == 1 and connection is not None:
+            active = connection
+            try:
+                return _run_transaction(
+                    conn=active,
+                    snapshot_input=snapshot_input,
+                    location=location,
+                    perception=perception,
+                    reasoning=reasoning,
+                    evaluation=evaluation,
+                    decision=decision,
+                    run_config=run_config,
+                    now=pinned_now,
+                )
+            except _RETRYABLE_DB_ERRORS:
+                _safe_rollback(active)
+                raise
+            except psycopg2.Error as exc:
+                _safe_rollback(active)
+                logger.error(
+                    "stage=execute_pipeline outcome=db_error error_type=%s error=%s",
+                    type(exc).__name__,
+                    exc,
+                )
+                raise DatabaseError(
+                    "Pipeline DB write failed: {0}".format(exc)
+                ) from exc
+            except Exception:
+                _safe_rollback(active)
+                raise
+        with pooled_connection(db_config) as active:
+            try:
+                return _run_transaction(
+                    conn=active,
+                    snapshot_input=snapshot_input,
+                    location=location,
+                    perception=perception,
+                    reasoning=reasoning,
+                    evaluation=evaluation,
+                    decision=decision,
+                    run_config=run_config,
+                    now=pinned_now,
+                )
+            except _RETRYABLE_DB_ERRORS:
+                _safe_rollback(active)
+                raise
+            except psycopg2.Error as exc:
+                _safe_rollback(active)
+                logger.error(
+                    "stage=execute_pipeline outcome=db_error error_type=%s error=%s",
+                    type(exc).__name__,
+                    exc,
+                )
+                raise DatabaseError(
+                    "Pipeline DB write failed: {0}".format(exc)
+                ) from exc
+            except Exception:
+                _safe_rollback(active)
+                raise
+
+    return with_retry(_attempt)
+
+
+def _run_transaction(
+    conn: PgConnection,
+    snapshot_input: Mapping[str, Any],
+    location: Optional[str],
+    perception: PerceptionPayload,
+    reasoning: ReasoningPayload,
+    evaluation: EvaluationPayload,
+    decision: DecisionPayload,
+    run_config: PipelineRunConfig,
+    now: Optional[datetime] = None,
+) -> PipelineExecutionResult:
+    transaction_started_at = now if now is not None else datetime.now(timezone.utc)
+    pipeline_started = time.perf_counter()
+
+    with conn.cursor() as cursor:
+        t0 = time.perf_counter()
+        snapshot_id = create_snapshot(
+            cursor=cursor, snapshot_input=snapshot_input, location=location, now=transaction_started_at,
+        )
+        logger.info(
+            "stage=create_snapshot snapshot_id=%s duration_ms=%d",
+            snapshot_id,
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        pipeline_run_id = create_pipeline_run(
+            cursor=cursor,
+            snapshot_id=snapshot_id,
+            pipeline_run=run_config,
+            now=transaction_started_at,
+        )
+        logger.info(
+            "stage=create_pipeline_run snapshot_id=%s pipeline_run_id=%s duration_ms=%d",
+            snapshot_id,
+            pipeline_run_id,
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        perception_id = insert_perception(
+            cursor=cursor,
             snapshot_id=snapshot_id,
             pipeline_run_id=pipeline_run_id,
-            perception_id=perception_id,
-            reasoning_id=reasoning_id,
-            evaluation_id=evaluation_id,
-            decision_id=decision_id,
+            perception=perception,
         )
-    except Exception:
-        active_connection.rollback()
-        raise
-    finally:
-        if owns_connection:
-            active_connection.close()
+        logger.info(
+            "stage=insert_perception pipeline_run_id=%s perception_id=%s duration_ms=%d",
+            pipeline_run_id,
+            perception_id,
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        reasoning_id = insert_reasoning(
+            cursor=cursor,
+            perception_id=perception_id,
+            pipeline_run_id=pipeline_run_id,
+            reasoning=reasoning,
+        )
+        logger.info(
+            "stage=insert_reasoning pipeline_run_id=%s reasoning_id=%s duration_ms=%d",
+            pipeline_run_id,
+            reasoning_id,
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        evaluation_id = insert_evaluation(
+            cursor=cursor,
+            reasoning_id=reasoning_id,
+            perception_id=perception_id,
+            pipeline_run_id=pipeline_run_id,
+            evaluation=evaluation,
+        )
+        logger.info(
+            "stage=insert_evaluation pipeline_run_id=%s evaluation_id=%s status=%s risk=%s duration_ms=%d",
+            pipeline_run_id,
+            evaluation_id,
+            _system_status_value(evaluation.system_status),
+            _risk_level_value(evaluation.risk_level),
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        decision_id = insert_decision(
+            cursor=cursor,
+            evaluation_id=evaluation_id,
+            pipeline_run_id=pipeline_run_id,
+            decision=decision,
+            now=transaction_started_at,
+        )
+        logger.info(
+            "stage=insert_decision pipeline_run_id=%s decision_id=%s status=%s risk=%s duration_ms=%d",
+            pipeline_run_id,
+            decision_id,
+            _system_status_value(decision.system_status),
+            _risk_level_value(decision.risk_level),
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+        t0 = time.perf_counter()
+        _finalize_pipeline_run(
+            cursor=cursor,
+            pipeline_run_id=pipeline_run_id,
+            decision=decision,
+            run_config=run_config,
+            decision_id=decision_id,
+            transaction_started_at=transaction_started_at,
+            now=transaction_started_at,
+        )
+        logger.info(
+            "stage=finalize_pipeline_run pipeline_run_id=%s duration_ms=%d",
+            pipeline_run_id,
+            int((time.perf_counter() - t0) * 1000),
+        )
+
+    conn.commit()
+    logger.info(
+        "stage=execute_pipeline outcome=ok pipeline_run_id=%s snapshot_id=%s duration_ms=%d",
+        pipeline_run_id,
+        snapshot_id,
+        int((time.perf_counter() - pipeline_started) * 1000),
+    )
+    return PipelineExecutionResult(
+        snapshot_id=snapshot_id,
+        pipeline_run_id=pipeline_run_id,
+        perception_id=perception_id,
+        reasoning_id=reasoning_id,
+        evaluation_id=evaluation_id,
+        decision_id=decision_id,
+    )
+
+
+def _safe_rollback(conn: PgConnection) -> None:
+    try:
+        conn.rollback()
+    except Exception as exc:
+        logger.warning(
+            "stage=db.rollback outcome=swallowed error_type=%s error=%s",
+            type(exc).__name__,
+            exc,
+        )
+
+
+def _safe_close(conn: PgConnection) -> None:
+    try:
+        conn.close()
+    except Exception as exc:
+        logger.warning(
+            "stage=db.close outcome=swallowed error_type=%s error=%s",
+            type(exc).__name__,
+            exc,
+        )
+
+
+def _system_status_value(value: Any) -> str:
+    if isinstance(value, SystemStatus):
+        return value.value
+    return SystemStatus(value).value
+
+
+def _risk_level_value(value: Any) -> str:
+    if isinstance(value, RiskLevel):
+        return value.value
+    return RiskLevel(value).value
 
 
 def create_snapshot(
     cursor: Any,
     snapshot_input: Mapping[str, Any],
     location: Optional[str],
+    now: Optional[datetime] = None,
 ) -> UUID:
-    """Insert one row into snapshots and return the generated ID."""
+    """
+    Insert one row per acquisition event into ``snapshots`` and return its ID.
+
+    Identity model (post-migration 022_observation_identity.sql):
+      * ``observation_id`` (auto-generated server-side via gen_random_uuid())
+        is the IMMUTABLE identity of one acquisition event.
+      * ``snapshot_hash`` is a NON-UNIQUE deduplication helper for content
+        equality lookups; identical content across two ingestion events
+        produces TWO rows with the same hash and DIFFERENT observation_ids.
+      * ``first_seen_at`` records when this acquisition was first observed
+        and is NEVER overwritten — auditors can recover the true ingestion
+        timeline regardless of replay/retry behavior.
+
+    There is no ON CONFLICT clause: every call produces a fresh audit row.
+    Re-runs are distinguishable; original timestamps are preserved.
+    """
     snapshot_hash = _compute_snapshot_hash(snapshot_input)
-    fetched_at_utc = datetime.utcnow().replace(tzinfo=timezone.utc)
+    fetched_at_utc = now if now is not None else datetime.now(timezone.utc)
 
     cursor.execute(
         """
         INSERT INTO snapshots (
             snapshot_hash,
             fetched_at_utc,
+            first_seen_at,
             location,
             openweather,
             poskobanjir,
             bmkg_alerts
         )
-        VALUES (%s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
             snapshot_hash,
+            fetched_at_utc,
             fetched_at_utc,
             location,
             _to_jsonb(snapshot_input.get("openweather")),
@@ -221,8 +718,14 @@ def create_pipeline_run(
     cursor: Any,
     snapshot_id: UUID,
     pipeline_run: PipelineRunConfig,
+    now: Optional[datetime] = None,
 ) -> UUID:
-    """Insert one row into pipeline_runs and return the generated ID."""
+    """Insert one row into pipeline_runs and return the generated ID.
+
+    ``now`` (optional) replaces the previous SQL-side ``NOW()`` literal so the
+    ``started_at`` column is deterministic for a pinned orchestrator clock.
+    """
+    started_at = now if now is not None else datetime.now(timezone.utc)
     cursor.execute(
         """
         INSERT INTO pipeline_runs (
@@ -234,12 +737,13 @@ def create_pipeline_run(
             api_version,
             pipeline_version
         )
-        VALUES (%s, %s, NOW(), %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
         RETURNING id
         """,
         (
             snapshot_id,
             pipeline_run.execution_mode,
+            started_at,
             pipeline_run.origin,
             pipeline_run.destination,
             pipeline_run.api_version,
@@ -316,7 +820,11 @@ def insert_evaluation(
     pipeline_run_id: UUID,
     evaluation: EvaluationPayload,
 ) -> UUID:
-    """Insert one row into evaluation_results and return the generated ID."""
+    """
+    Insert one row into evaluation_results and return the generated ID.
+
+    Caller MUST pass a payload that has been through validate_evaluation_payload.
+    """
     cursor.execute(
         """
         INSERT INTO evaluation_results (
@@ -336,8 +844,8 @@ def insert_evaluation(
             reasoning_id,
             perception_id,
             pipeline_run_id,
-            evaluation.system_status,
-            evaluation.risk_level,
+            _system_status_value(evaluation.system_status),
+            _risk_level_value(evaluation.risk_level),
             _as_decimal(evaluation.probability),
             _as_decimal(evaluation.confidence_score),
             evaluation.requires_manual_review,
@@ -351,8 +859,13 @@ def insert_decision(
     evaluation_id: UUID,
     pipeline_run_id: UUID,
     decision: DecisionPayload,
+    now: Optional[datetime] = None,
 ) -> UUID:
-    """Insert one row into decisions and return the generated ID."""
+    """
+    Insert one row into decisions and return the generated ID.
+
+    Caller MUST pass a payload that has been through validate_decision_payload.
+    """
     cursor.execute(
         """
         INSERT INTO decisions (
@@ -375,16 +888,16 @@ def insert_decision(
         (
             evaluation_id,
             pipeline_run_id,
-            decision.system_status,
+            _system_status_value(decision.system_status),
             decision.requires_manual_review,
             decision.decision_reason,
             decision.data_validity,
             decision.ml_execution_mode,
-            decision.risk_level,
+            _risk_level_value(decision.risk_level),
             _as_decimal(decision.probability),
             _as_decimal(decision.confidence_score),
             decision.is_safe_for_automation,
-            datetime.utcnow().replace(tzinfo=timezone.utc),
+            now if now is not None else datetime.now(timezone.utc),
         ),
     )
     return cursor.fetchone()[0]
@@ -397,6 +910,7 @@ def _finalize_pipeline_run(
     run_config: PipelineRunConfig,
     decision_id: UUID,
     transaction_started_at: datetime,
+    now: Optional[datetime] = None,
 ) -> None:
     """
     Update the existing pipeline_runs row with completion metadata.
@@ -404,18 +918,20 @@ def _finalize_pipeline_run(
     This keeps the single row created in pipeline_runs aligned with the final
     decision outcome while still honoring the one-transaction requirement.
     """
-    completed_at = datetime.utcnow().replace(tzinfo=timezone.utc)
+    completed_at = now if now is not None else datetime.now(timezone.utc)
     execution_time_ms = int(
         (completed_at - transaction_started_at).total_seconds() * 1000
     )
+    status_value = _system_status_value(decision.system_status)
+    risk_value = _risk_level_value(decision.risk_level)
     final_decision = {
         "decision_id": str(decision_id),
-        "system_status": decision.system_status,
+        "system_status": status_value,
         "requires_manual_review": decision.requires_manual_review,
         "decision_reason": decision.decision_reason,
         "data_validity": decision.data_validity,
         "ml_execution_mode": decision.ml_execution_mode,
-        "risk_level": decision.risk_level,
+        "risk_level": risk_value,
         "probability": decision.probability,
         "confidence_score": decision.confidence_score,
         "is_safe_for_automation": decision.is_safe_for_automation,
@@ -437,8 +953,8 @@ def _finalize_pipeline_run(
             completed_at,
             execution_time_ms,
             Json(final_decision),
-            decision.system_status,
-            decision.risk_level,
+            status_value,
+            risk_value,
             _as_decimal(decision.confidence_score),
             pipeline_run_id,
         ),
@@ -446,14 +962,34 @@ def _finalize_pipeline_run(
 
 
 def _compute_snapshot_hash(snapshot_input: Mapping[str, Any]) -> str:
+    normalized_input = _normalize_for_hash(snapshot_input)
     normalized_snapshot = json.dumps(
-        snapshot_input,
+        normalized_input,
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
         default=_json_default,
     )
     return hashlib.sha256(normalized_snapshot.encode("utf-8")).hexdigest()
+
+
+def _normalize_for_hash(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(k): _normalize_for_hash(v) for k, v in sorted(value.items(), key=lambda item: str(item[0]))}
+    if isinstance(value, list):
+        return [_normalize_for_hash(v) for v in value]
+    if isinstance(value, tuple):
+        return [_normalize_for_hash(v) for v in value]
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValidationError("snapshot_input contains NaN or Infinity")
+        return round(value, 6)
+    if isinstance(value, Decimal):
+        as_float = float(value)
+        if not math.isfinite(as_float):
+            raise ValidationError("snapshot_input contains NaN or Infinity")
+        return round(as_float, 6)
+    return value
 
 
 def _json_default(value: Any) -> Any:
@@ -470,17 +1006,6 @@ def _to_jsonb(value: Any) -> Optional[Json]:
 
 def _as_decimal(value: float) -> Decimal:
     return Decimal(str(value))
-
-
-def _validate_risk_level(value: str, field_name: str) -> None:
-    if value not in ALLOWED_RISK_LEVELS:
-        raise ValueError(
-            "{0} must be one of {1}; received {2!r}".format(
-                field_name,
-                sorted(ALLOWED_RISK_LEVELS),
-                value,
-            )
-        )
 
 
 def result_to_dict(result: PipelineExecutionResult) -> Dict[str, str]:

@@ -14,7 +14,14 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+from app.services.bmkg_filter import filter_jakarta_bmkg_alerts
 from app.services.bnpb_context import VulnerabilityContext, get_vulnerability_context
+from app.services.dem_elevation import (
+    classify_flood_zone,
+    estimate_flow_direction,
+    get_elevation,
+    get_elevation_context,
+)
 from app.services.hydrology_analyzer import HydrologyAssessment, analyze_hydrology
 from app.services.plausibility_check import score_plausibility
 
@@ -51,6 +58,8 @@ class PerceptionResult:
     # Always present so ActionAgent can surface it regardless of whether
     # vulnerability_context is None (failed/low-confidence mapping).
     mapping_info: dict = field(default_factory=dict)
+    # Additive DEM enrichment. Empty when coordinates are absent or the DEM is unavailable.
+    elevation: dict = field(default_factory=dict)
 
 
 class PerceptionAgent:
@@ -77,15 +86,26 @@ class PerceptionAgent:
     )
     _HISTORY_KEYS = ("ketinggian", "height_cm_history", "water_level_history")
 
-    def run(self, snapshot: dict) -> PerceptionResult:
+    def run(self, snapshot: dict, *, now: "datetime | None" = None) -> PerceptionResult:
         warnings: list[str] = []
 
         openweather = snapshot.get("openweather") or {}
         poskobanjir = snapshot.get("poskobanjir") or []
-        bmkg_alerts = snapshot.get("bmkg_alerts") or []
+        bmkg_alerts = filter_jakarta_bmkg_alerts(snapshot.get("bmkg_alerts") or [])
 
-        freshness = self._compute_freshness(snapshot, warnings)
+        freshness = self._compute_freshness(snapshot, warnings, now=now)
         completeness = self._compute_completeness(snapshot)
+
+        # Surface absent hydrology early so operators correlate a downstream
+        # STALE/DEGRADED TMA response with a snapshot that already carries no
+        # station data. PerceptionAgent itself does not call the TMA scraper —
+        # RoutingAgent does — but seeing both signals together in the response
+        # cuts diagnosis time in half during an incident.
+        if not poskobanjir:
+            warnings.append(
+                "Snapshot contains no poskobanjir water-level records — hydrology "
+                "signals will rely on cached or external TMA data if available."
+            )
         signal_presence = self._assess_signal_presence(openweather, poskobanjir, bmkg_alerts)
         raw_features = self._extract_raw_features(openweather, poskobanjir, bmkg_alerts)
         # score_plausibility returns a dict; extract the float here so
@@ -101,19 +121,102 @@ class PerceptionAgent:
         )
 
         # BNPB InaRISK vulnerability context — silently None on any failure.
-        # Derive district from snapshot["location"] if set, else fall back to
-        # OpenWeatherMap city name. No default "Jakarta" — ambiguous inputs
-        # correctly return (None, mapping_info) from the mapping function.
-        district = (
-            snapshot.get("location")
-            or (openweather.get("name") if openweather else None)
-            or ""
+        #
+        # Resolution policy (priority order, the FIRST surface to produce a
+        # non-empty district_query wins):
+        #
+        #   (a) User-supplied location string (kota OR kecamatan alias) →
+        #       trust verbatim and let ``get_vulnerability_context`` resolve
+        #       kota-level aliases internally. This guarantees user intent
+        #       is never overridden by GPS-derived coord lookups.
+        #
+        #   (b) Coord-based kecamatan_by_coords on the openweather centroid
+        #       — used only when (a) is absent, OR purely as ENRICHMENT
+        #       metadata (kecamatan name + idkec) that never changes the
+        #       kabkot the IRBI gate keys off.
+        #
+        #   (c) Openweather "name" — legacy fallback.
+        from app.services.bnpb_jakarta_mapper import (
+            get_kecamatan,
+            get_kecamatan_by_coords,
         )
+
+        raw_location = (
+            snapshot.get("location_raw")
+            if isinstance(snapshot.get("location_raw"), str)
+            else snapshot.get("location")
+        )
+
+        # The authoritative kabkot-resolution string: trust the user when
+        # supplied; otherwise leave empty and let the coord/name fallbacks
+        # populate it.
+        district_query: str = ""
+        if isinstance(raw_location, str) and raw_location.strip():
+            district_query = raw_location
+
+        # Kecamatan-level lookup: try the user string first (matches
+        # "Penjaringan", "kec. tanjung priok", etc.). When the user input
+        # is a kota, ``get_kecamatan`` returns None — we then fall back
+        # to GPS-coord nearest-neighbour for enrichment ONLY.
+        kecamatan_record: dict | None = None
+        if isinstance(raw_location, str) and raw_location.strip():
+            kecamatan_record = get_kecamatan(raw_location)
+        coord = openweather.get("coord") or {}
+        try:
+            _lat: float | None = float(coord.get("lat"))
+            _lon: float | None = float(coord.get("lon"))
+        except (TypeError, ValueError):
+            _lat = None
+            _lon = None
+
+        if kecamatan_record is None and _lat is not None and _lon is not None:
+            kecamatan_record = get_kecamatan_by_coords(_lat, _lon)
+
+        # ONLY fill district_query from a kecamatan record when the user
+        # gave us nothing AND the kecamatan was resolved from a user-typed
+        # string (not from a GPS coord — coord-derived kabkot must not
+        # override a user-supplied kota).
+        if not district_query and kecamatan_record is not None and \
+                kecamatan_record.get("distance_km") is None:
+            kabkot_raw = str(kecamatan_record.get("kabkot") or "").strip()
+            if kabkot_raw and kabkot_raw != "UNKNOWN":
+                district_query = " ".join(p.capitalize() for p in kabkot_raw.split())
+        if not district_query:
+            district_query = (openweather.get("name") if openweather else "") or ""
+
         # get_vulnerability_context always returns a 2-tuple:
         #   (VulnerabilityContext | None, mapping_info dict)
-        # mapping_info is always populated for transparency output even when
-        # vuln_context is None (low confidence, stale data, API down).
-        vuln_context, mapping_info = get_vulnerability_context(str(district))
+        # It handles kota AND kecamatan aliases internally — so passing
+        # the raw user string is sufficient.
+        vuln_context, mapping_info = get_vulnerability_context(str(district_query))
+        if kecamatan_record is not None:
+            # Surface the kecamatan-level lineage for operator audit. Kept
+            # under a separate key so existing consumers of mapping_info
+            # don't see a shape change.
+            mapping_info["kecamatan"] = {
+                "name":        kecamatan_record.get("name"),
+                "kabkot":      kecamatan_record.get("kabkot"),
+                "idkec":       kecamatan_record.get("idkec"),
+                "distance_km": kecamatan_record.get("distance_km"),
+                "source":      "bnpb_jakarta_mapper",
+            }
+
+        elevation_payload: dict = {}
+        if _lat is not None and _lon is not None:
+            elev = get_elevation(_lat, _lon)
+            elev_ctx = get_elevation_context(_lat, _lon)
+            flow = estimate_flow_direction(_lat, _lon)
+            elevation_payload = {
+                "elevation_m": elev["elevation_m"],
+                "flood_zone": classify_flood_zone(elev["elevation_m"])
+                if elev["elevation_m"] is not None else "unknown",
+                "is_below_sea_level": elev["is_below_sea_level"],
+                "is_local_depression": elev_ctx["is_local_minimum"],
+                "depression_score": elev_ctx["depression_score"],
+                "flow_direction": flow.get("flow_direction", "unknown"),
+                "flow_confidence": flow.get("confidence", "low"),
+                "source": "DEMNAS_BIG_8m",
+            }
 
         return PerceptionResult(
             snapshot=snapshot,
@@ -130,16 +233,28 @@ class PerceptionAgent:
             perception_warnings=warnings,
             vulnerability_context=vuln_context,
             mapping_info=mapping_info,
+            elevation=elevation_payload,
         )
 
-    def _compute_freshness(self, snapshot: dict, warnings: list[str]) -> float:
+    def _compute_freshness(
+        self,
+        snapshot: dict,
+        warnings: list[str],
+        *,
+        now: "datetime | None" = None,
+    ) -> float:
+        """
+        Compute freshness against the orchestrator's pinned clock when supplied.
+        Falls back to wall-clock only when called outside a pipeline run.
+        """
+        ref = now if now is not None else datetime.now(timezone.utc)
         fetched_at = snapshot.get("fetched_at_utc")
         if not fetched_at:
             warnings.append("Missing fetched_at_utc — data freshness unknown.")
             return -1.0
         try:
             dt = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00"))
-            return (datetime.now(timezone.utc) - dt).total_seconds() / 60.0
+            return (ref - dt).total_seconds() / 60.0
         except (ValueError, TypeError):
             warnings.append(f"Cannot parse fetched_at_utc: {fetched_at!r}")
             return -1.0

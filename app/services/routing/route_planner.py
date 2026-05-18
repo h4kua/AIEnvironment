@@ -1,5 +1,5 @@
 """
-Route planner — Google Maps Directions API with flood-aware safety scoring.
+Route planner — Google Maps Routes API with flood-aware safety scoring.
 
 Key design constraint: Google Maps has NO knowledge of flood conditions.
 All flood intelligence is injected from the internal AI pipeline via flood_zones.
@@ -7,6 +7,7 @@ This module's sole job is fetching path geometry and scoring it against those zo
 
 Security:
   - API key is read from env at call time (never at import time)
+  - Key is passed via X-Goog-Api-Key header, never in the URL
   - Key is never logged, printed, or included in error messages
   - Missing key degrades gracefully — never raises, never crashes the API
 """
@@ -15,15 +16,29 @@ from __future__ import annotations
 
 import math
 import os
+import time
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_random_exponential
 
-load_dotenv()
+from app.api.observability import ROUTES_CIRCUIT_OPEN
 
-_DIRECTIONS_URL = "https://maps.googleapis.com/maps/api/directions/json"
+if os.getenv("FLOOD_LOAD_DOTENV", "1") == "1":
+    load_dotenv()
+
+_ROUTES_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+_ROUTES_FIELD_MASK = (
+    "routes.duration,routes.distanceMeters,"
+    "routes.polyline.encodedPolyline,routes.description"
+)
 _REQUEST_TIMEOUT = 10
+_CIRCUIT_FAILURE_LIMIT = 5
+_CIRCUIT_WINDOW_S = 60.0
+_CIRCUIT_OPEN_S = 60.0
+_route_failures: list[float] = []
+_circuit_open_until = 0.0
 
 # Multi-objective scoring weights (must sum to 1.0).
 # Safety is primary: a faster route through a flood zone is never acceptable.
@@ -91,14 +106,85 @@ def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 # ─── Public API ──────────────────────────────────────────────────────────────
 
+def _parse_duration_s(value: str | int | None) -> int:
+    """Parse Routes API duration string ('1234s') or plain int to integer seconds."""
+    if value is None:
+        return 0
+    if isinstance(value, int):
+        return value
+    try:
+        return int(str(value).rstrip("s"))
+    except ValueError:
+        return 0
+
+
+def _circuit_is_open() -> bool:
+    is_open = time.monotonic() < _circuit_open_until
+    ROUTES_CIRCUIT_OPEN.set(1.0 if is_open else 0.0)
+    return is_open
+
+
+def _record_route_failure() -> None:
+    global _circuit_open_until
+    now = time.monotonic()
+    _route_failures.append(now)
+    while _route_failures and now - _route_failures[0] > _CIRCUIT_WINDOW_S:
+        _route_failures.pop(0)
+    if len(_route_failures) >= _CIRCUIT_FAILURE_LIMIT:
+        _circuit_open_until = now + _CIRCUIT_OPEN_S
+        ROUTES_CIRCUIT_OPEN.set(1.0)
+
+
+def _record_route_success() -> None:
+    _route_failures.clear()
+    ROUTES_CIRCUIT_OPEN.set(0.0)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_random_exponential(min=0.5, max=4),
+    retry=retry_if_exception_type(
+        (requests.exceptions.Timeout, requests.exceptions.ConnectionError)
+    ),
+    reraise=True,
+)
+def _post_routes(headers: dict[str, str], body: dict[str, Any]) -> requests.Response:
+    return requests.post(_ROUTES_URL, headers=headers, json=body, timeout=_REQUEST_TIMEOUT)
+
+
+def _normalize_route(route: dict) -> dict:
+    """
+    Convert a Routes API route object to the legacy Directions API shape used
+    internally by compute_route_safety() and select_best_route().
+
+    Routes API fields:
+      route.duration              → "1234s" string
+      route.distanceMeters        → int
+      route.polyline.encodedPolyline → encoded polyline string
+      route.description           → summary string
+    """
+    dur_s = _parse_duration_s(route.get("duration"))
+    dist_m = int(route.get("distanceMeters", 0))
+    polyline = route.get("polyline", {}).get("encodedPolyline", "")
+    description = route.get("description", "")
+    return {
+        "overview_polyline": {"points": polyline},
+        "legs": [{"duration": {"value": dur_s}, "distance": {"value": dist_m}}],
+        "summary": description,
+    }
+
+
 def get_routes(origin: str, destination: str) -> dict:
     """
-    Fetch up to 3 alternative routes from the Google Maps Directions API.
+    Fetch up to 3 alternative routes from the Google Maps Routes API.
+
+    Uses POST https://routes.googleapis.com/directions/v2:computeRoutes.
+    API key is sent via X-Goog-Api-Key header — never appended to the URL.
 
     Returns:
     {
         "ok":     bool,
-        "routes": [...],      # raw route objects from the Directions API
+        "routes": [...],      # normalized route dicts (legacy Directions API shape)
         "error":  str | None  # set only when ok=False
     }
 
@@ -112,47 +198,66 @@ def get_routes(origin: str, destination: str) -> dict:
             "routes": [],
             "error": "Routing service unavailable due to missing configuration.",
         }
+    if _circuit_is_open():
+        return {
+            "ok": False,
+            "routes": [],
+            "error": "route_unavailable",
+            "reason": "circuit_open",
+        }
 
-    params: dict[str, Any] = {
-        "origin": origin,
-        "destination": destination,
-        "alternatives": "true",
-        "key": api_key,
+    headers = {
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": _ROUTES_FIELD_MASK,
+        "Content-Type": "application/json",
+    }
+    body: dict[str, Any] = {
+        "origin": {"address": origin},
+        "destination": {"address": destination},
+        "travelMode": "DRIVE",
+        "computeAlternativeRoutes": True,
     }
 
     try:
-        resp = requests.get(_DIRECTIONS_URL, params=params, timeout=_REQUEST_TIMEOUT)
+        resp = _post_routes(headers, body)
         resp.raise_for_status()
         data = resp.json()
     except requests.exceptions.Timeout:
-        return {"ok": False, "routes": [], "error": "Google Maps API request timed out."}
-    except requests.exceptions.RequestException:
-        # Intentionally vague — the exception string may contain the key-bearing URL.
-        return {"ok": False, "routes": [], "error": "Google Maps API request failed."}
-    except ValueError:
-        return {"ok": False, "routes": [], "error": "Google Maps API returned invalid JSON."}
-
-    api_status = data.get("status", "UNKNOWN")
-    if api_status != "OK":
+        _record_route_failure()
+        return {"ok": False, "routes": [], "error": "Routes API request timed out."}
+    except requests.exceptions.HTTPError as exc:
+        if exc.response is not None and exc.response.status_code >= 500:
+            _record_route_failure()
+        _err_data: dict = {}
+        try:
+            _err_data = exc.response.json()
+        except Exception:
+            pass
+        _api_status = _err_data.get("error", {}).get("status", "")
         _messages: dict[str, str] = {
-            "ZERO_RESULTS": "No route found between the given origin and destination.",
             "NOT_FOUND": "Origin or destination could not be geocoded.",
-            "REQUEST_DENIED": "API key lacks Directions API permission.",
-            "OVER_DAILY_LIMIT": "API daily quota exceeded.",
-            "OVER_QUERY_LIMIT": "API rate limit hit — retry shortly.",
-            "INVALID_REQUEST": "Invalid origin or destination format.",
+            "PERMISSION_DENIED": "API key lacks Routes API permission.",
+            "RESOURCE_EXHAUSTED": "API daily quota exceeded or rate limit hit.",
+            "INVALID_ARGUMENT": "Invalid origin or destination format.",
         }
         return {
             "ok": False,
             "routes": [],
-            "error": _messages.get(api_status, f"Directions API status: {api_status}"),
+            "error": _messages.get(_api_status, "Routes API request failed."),
         }
+    except requests.exceptions.RequestException:
+        _record_route_failure()
+        return {"ok": False, "routes": [], "error": "Routes API request failed."}
+    except ValueError:
+        _record_route_failure()
+        return {"ok": False, "routes": [], "error": "Routes API returned invalid JSON."}
 
-    routes = data.get("routes", [])
-    if not routes:
+    raw_routes = data.get("routes", [])
+    if not raw_routes:
         return {"ok": False, "routes": [], "error": "No routes returned by Google Maps."}
 
-    return {"ok": True, "routes": routes, "error": None}
+    _record_route_success()
+    return {"ok": True, "routes": [_normalize_route(r) for r in raw_routes], "error": None}
 
 
 def compute_route_safety(route: dict, flood_zones: list[dict]) -> float:

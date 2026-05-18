@@ -11,7 +11,6 @@ the decision logic without touching any agent that reasons about risk.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
@@ -40,10 +39,11 @@ _PUBLIC_FAILURE_FIELDS = {"type", "severity", "message", "detail"}
 # Saturation control: suppress repeated BNPB advisories for the same district
 # within this window. Alert fatigue is a safety risk in disaster operations.
 _ADVISORY_SUPPRESS_SECONDS = 30 * 60  # 30 minutes
-# WARNING: This deduplication is per-process and not safe for multi-worker deployments.
-# Each worker process maintains its own in-memory dict — a district can receive duplicate
-# advisories within the 30-minute window if successive requests land on different workers.
-_bnpb_advisory_last_sent: dict[str, float] = {}  # district → unix timestamp
+# NOTE: Previously a module-global dict. Replaced by per-call injected state so
+# the agent is request-scoped, deterministic on replay, and safe across workers.
+# Callers may pass an explicit `bnpb_suppression_state` dict into ActionAgent.run
+# (e.g. backed by Redis in production). When omitted, suppression is disabled —
+# safer than silently re-issuing duplicates from a stale per-worker dict.
 
 
 _HISTORICAL_ESCALATION_RISK_LEVELS = {"WARNING", "DANGER"}
@@ -93,6 +93,9 @@ class ActionAgent:
         self,
         evaluation: "EvaluationResult",
         historical_context: "HistoricalContext | None" = None,
+        *,
+        now: "datetime | None" = None,
+        bnpb_suppression_state: "dict[str, float] | None" = None,
     ) -> dict:
         """
         Transform EvaluationResult into the canonical output dict.
@@ -100,7 +103,14 @@ class ActionAgent:
         historical_context is used only in offline evaluation (historical_demo.py).
         FloodDecisionPipeline never passes it; fields that depend on it
         (historical_context, decision_explanation) are always null in the live pipeline.
+
+        ``now`` (optional) — orchestrator-pinned clock used for the ``timestamp_utc``
+        field and BNPB advisory saturation. When omitted, wall-clock is used.
+        ``bnpb_suppression_state`` (optional) — caller-supplied dict of
+        district → epoch-seconds for the 30-minute advisory throttle. When
+        omitted, suppression is skipped (no module-global fallback).
         """
+        ts = now if now is not None else datetime.now(timezone.utc)
         reasoning = evaluation.reasoning
         baseline  = evaluation.baseline_check
         dec       = evaluation.decision  # DecisionResult | None
@@ -117,7 +127,11 @@ class ActionAgent:
         # Prepend BNPB advisory. Returns (actions, suppression_trace | None).
         # suppression_trace is non-None when the 30-min TTL is still active.
         recommended_action, suppression_trace = self._prepend_bnpb_advisory(
-            evaluation.recommended_action, vuln, evaluation.risk_level
+            evaluation.recommended_action,
+            vuln,
+            evaluation.risk_level,
+            now_ts=ts.timestamp(),
+            suppression_state=bnpb_suppression_state,
         )
         if suppression_trace:
             bnpb_trace.append(suppression_trace)
@@ -185,10 +199,12 @@ class ActionAgent:
 
             # ── BNPB InaRISK vulnerability context ───────────────────────────
             "vulnerability_context": vuln.to_dict() if vuln else None,
+            "elevation": getattr(evaluation, "elevation", {}) or None,
 
             # ── Decision hierarchy trace (Tasks 10, 11) ──────────────────────
             "decision_source": dec.decision_source if dec else "unknown",
             "decision_trace": dec.decision_trace if dec else [],
+            "decision_trace_struct": dec.decision_trace_struct if dec else [],
 
             # ── Adaptive threshold transparency (Task 4) ─────────────────────
             "adaptive_threshold": dec.adaptive_threshold if dec else {},
@@ -310,13 +326,20 @@ class ActionAgent:
 
             # ── Metadata ─────────────────────────────────────────────────────
             # pipeline_version is injected by FloodDecisionPipeline after this
-            # method returns — do not set it here.
-            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+            # method returns — do not set it here. timestamp_utc derives from
+            # the orchestrator-pinned `now` for deterministic replay.
+            "timestamp_utc": ts.isoformat(),
             "model_name": reasoning.prediction.get("model_name", "unknown"),
         }
 
     def _prepend_bnpb_advisory(
-        self, actions: list, vuln, risk_level: str
+        self,
+        actions: list,
+        vuln,
+        risk_level: str,
+        *,
+        now_ts: float | None = None,
+        suppression_state: "dict[str, float] | None" = None,
     ) -> tuple[list, str | None]:
         """
         Prepend BNPB InaRISK advisory to the action list.
@@ -327,29 +350,34 @@ class ActionAgent:
             suppression_trace is a non-None [BNPB-SUPPRESSED] string when the
             30-minute TTL is still active — caller must append it to bnpb_trace.
 
+        Saturation guard is now stateless by default: it only fires when the
+        caller injects ``suppression_state`` (a dict keyed by district to the
+        epoch-seconds of the last advisory) and an explicit ``now_ts``. This
+        removes the previous module-global mutable dict and makes replays
+        deterministic.
+
         Safety contracts:
           - NEVER modifies risk_level or probability.
           - Templates are strictly gated by risk_level:
               SAFE    → monitoring guidance only — no deployment language
               WARNING → pre-positioning only — explicit "do NOT deploy" clause
               DANGER  → execution permitted — phased deployment with commander approval
-          - Saturation guard: same district within 30 min → suppress + trace.
         """
         if vuln is None:
             return list(actions), None
 
         district = vuln.district
 
-        # Saturation guard — emit auditable suppression trace instead of silent skip.
-        now = time.time()
-        last_sent = _bnpb_advisory_last_sent.get(district, 0.0)
-        if now - last_sent < _ADVISORY_SUPPRESS_SECONDS:
-            suppression_trace = (
-                f"[BNPB-SUPPRESSED] Advisory already issued within 30 minutes "
-                f"for {district} — duplicate suppressed"
-            )
-            return list(actions), suppression_trace
-        _bnpb_advisory_last_sent[district] = now
+        # Saturation guard only when caller provides both the clock and state.
+        if suppression_state is not None and now_ts is not None:
+            last_sent = suppression_state.get(district, 0.0)
+            if now_ts - last_sent < _ADVISORY_SUPPRESS_SECONDS:
+                suppression_trace = (
+                    f"[BNPB-SUPPRESSED] Advisory already issued within 30 minutes "
+                    f"for {district} — duplicate suppressed"
+                )
+                return list(actions), suppression_trace
+            suppression_state[district] = now_ts
 
         pop  = vuln.affected_population
         irbi = vuln.irbi_flood_score

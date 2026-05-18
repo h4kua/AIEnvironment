@@ -3,16 +3,12 @@ Smoke test for FloodDecisionPipeline end-to-end output structure.
 
 Verifies that the pipeline returns a structurally valid response with all
 required top-level keys, regardless of the current snapshot values.
-
-The module is self-contained: if a live snapshot is not present at
-``DEFAULT_REALTIME_SNAPSHOT``, the autouse fixture below writes a minimal
-Jakarta-normal-range snapshot for the duration of the test module and
-removes it on teardown. Live snapshots produced by the data ingestion
-pipeline are detected and left untouched.
 """
+
 import json
 from datetime import datetime, timezone
 
+import pandas as pd
 import pytest
 
 from app.pipeline.flood_pipeline import FloodDecisionPipeline
@@ -32,11 +28,10 @@ _REQUIRED_KEYS = {
     "_decision_authority",
 }
 
-_VALID_RISK_LEVELS = {"SAFE", "WARNING", "DANGER", "UNKNOWN"}
+_VALID_RISK_LEVELS = {"SAFE", "PRE_ALERT", "WARNING", "DANGER", "UNKNOWN"}
 
 
 def _minimal_snapshot() -> dict:
-    """Synthetic snapshot in Jakarta normal operational range."""
     return {
         "fetched_at_utc": datetime.now(timezone.utc).isoformat(),
         "location": "Jakarta Selatan",
@@ -63,58 +58,42 @@ def _minimal_snapshot() -> dict:
 
 @pytest.fixture(scope="module", autouse=True)
 def _provision_realtime_snapshot():
-    """
-    Ensure the snapshot file exists; remove only files this fixture created.
-
-    Handles a checked-in artefact in this repo: ``poskobanjir/data/clean`` and
-    ``poskobanjir/data/raw`` exist in the working tree as empty 0-byte files
-    (probably from a botched ``touch`` during initial checkout). Production
-    code would have these as directories. The fixture upgrades the empty
-    placeholder to a directory on the fly so the pipeline can write its JSON.
-    """
     path = DEFAULT_REALTIME_SNAPSHOT
-    created_here = False
+    parent = path.parent
     placeholders_promoted: list = []
+    original_contents: str | None = None
 
-    if not path.exists():
-        parent = path.parent
-        # Walk up the chain of intended directories that exist as empty files
-        # and replace them with real directories. We never touch non-empty files.
-        chain: list = []
-        cursor = parent
-        while cursor != cursor.parent:
-            if cursor.exists() and not cursor.is_dir():
-                if cursor.stat().st_size == 0:
-                    chain.append(cursor)
-                else:
-                    break  # non-empty file — refuse to clobber
-            cursor = cursor.parent
-        for stray in chain:
-            stray.unlink()
-            placeholders_promoted.append(stray)
+    chain: list = []
+    cursor = parent
+    while cursor != cursor.parent:
+        if cursor.exists() and not cursor.is_dir():
+            if cursor.stat().st_size == 0:
+                chain.append(cursor)
+            else:
+                break
+        cursor = cursor.parent
+    for stray in chain:
+        stray.unlink()
+        placeholders_promoted.append(stray)
 
-        try:
-            parent.mkdir(parents=True, exist_ok=True)
-        except FileExistsError:
-            pass
+    parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        original_contents = path.read_text(encoding="utf-8")
 
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(_minimal_snapshot(), fh, indent=2)
-        created_here = True
-
+    path.write_text(json.dumps(_minimal_snapshot(), indent=2), encoding="utf-8")
     yield
 
-    if created_here and path.exists():
-        try:
+    try:
+        if original_contents is not None:
+            path.write_text(original_contents, encoding="utf-8")
+        elif path.exists():
             path.unlink()
-        except OSError:
-            pass
-    # Restore the empty-file placeholders we promoted, so the working tree
-    # state matches the original checkout.
+    except OSError:
+        pass
+
     for stray in placeholders_promoted:
         try:
             if stray.exists() and stray.is_dir():
-                # Only remove if empty — never delete a directory with content.
                 try:
                     stray.rmdir()
                 except OSError:
@@ -125,31 +104,46 @@ def _provision_realtime_snapshot():
 
 
 def test_pipeline_returns_required_keys():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     missing = _REQUIRED_KEYS - result.keys()
     assert not missing, f"Pipeline output missing keys: {missing}"
 
 
 def test_pipeline_risk_level_is_valid():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     assert result["risk_level"] in _VALID_RISK_LEVELS
 
 
 def test_pipeline_probability_is_bounded():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     assert 0.0 <= result["probability"] <= 1.0
 
 
 def test_pipeline_confidence_score_is_bounded():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     assert 0.0 <= result["confidence_score"] <= 1.0
 
 
 def test_pipeline_decision_authority_is_evaluation_agent():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     assert result["_decision_authority"] == "EvaluationAgent"
 
 
 def test_pipeline_version_is_agentic():
-    result = FloodDecisionPipeline().run_from_file()
+    result = FloodDecisionPipeline(persist=False).run_from_file(replay_mode=True)
     assert result["pipeline_version"] == "agentic-v2.0"
+
+
+def test_pipeline_trend_analysis_comes_from_snapshot_history(monkeypatch):
+    history = pd.DataFrame(
+        [
+            {"timestamp": "2026-04-18T08:00:00+00:00", "rainfall_mm": 4.0, "water_level_ratio": 0.20},
+            {"timestamp": "2026-04-18T09:00:00+00:00", "rainfall_mm": 9.0, "water_level_ratio": 0.35},
+        ]
+    )
+    monkeypatch.setattr("app.realtime_native.feature_builder._load_history", lambda path=None: history)
+
+    result = FloodDecisionPipeline(persist=False).run(_minimal_snapshot(), replay_mode=True)
+
+    assert result["trend_analysis"]["source"] == "realtime_snapshot_history"
+    assert result["trend_analysis"]["risk_trend"] == result["diagnostics"]["trend_state"]["risk_trend"]

@@ -1,0 +1,17 @@
+{
+  "bundle_version": "2.0.0",
+  "model_sha256": "161571583e522da6ea2265b65dd690af8f7eb3781fe7ca537e1031d78e40fa84",
+  "ood_sha256": "35d746030143d871a776ee6604f4b105100ca127d80636043c200e2daef46745",
+  "history_rows": 1406,
+  "recent_rainfall_mean": 26.70678510393025,
+  "recent_wlr_mean": 0.674173979122839,
+  "training_rows": 2928,
+  "training_rainfall_mean": 56.05592588797814,
+  "training_wlr_mean": 0.44338992427161333,
+  "probability": 0.044,
+  "confidence": 0.3569,
+  "is_outlier": true,
+  "ood_score": -0.0574,
+  "raw_conf": 0.3569,
+  "floor_in_card": 0.6
+}

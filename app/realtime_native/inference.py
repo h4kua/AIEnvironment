@@ -1,31 +1,24 @@
 import json
-from functools import lru_cache
+import os
 
-import joblib
 import numpy as np
 
+from app.realtime_native.bundle import load_runtime_bundle
 from app.realtime_native.feature_builder import (
     REALTIME_NATIVE_FEATURES,
     build_realtime_native_features_from_file,
 )
-from app.utils.paths import DEFAULT_REALTIME_SNAPSHOT, MODELS_DIR, REPORTS_DIR
+from app.utils.paths import DEFAULT_REALTIME_SNAPSHOT, REPORTS_DIR
 
 
-MODEL_PATH = MODELS_DIR / "flood_model_realtime_native.pkl"
-SCALER_PATH = MODELS_DIR / "scaler_realtime_native.pkl"
-OOD_PATH = MODELS_DIR / "ood_detector_realtime_native.pkl"
-MODEL_CARD_PATH = MODELS_DIR / "model_card_realtime_native.json"
+def _load_thresholds() -> dict:
+    return dict(load_runtime_bundle().thresholds)
 
 
-def _load_json(path):
-    with open(path, "r", encoding="utf-8") as file:
-        return json.load(file)
-
-
-def _classify(probability):
-    if probability < 0.2:
+def _classify(probability: float, thresholds: dict) -> str:
+    if probability < thresholds["warning"]:
         return "SAFE"
-    if probability < 0.45:
+    if probability < thresholds["danger"]:
         return "WARNING"
     return "DANGER"
 
@@ -81,26 +74,38 @@ def _recommended_action(risk_level):
     ]
 
 
-@lru_cache(maxsize=1)
 def _load_assets() -> tuple:
-    """Load and cache model assets on first call."""
-    model = joblib.load(MODEL_PATH)
-    scaler = joblib.load(SCALER_PATH)
-    ood_detector = joblib.load(OOD_PATH)
-    model_card = _load_json(MODEL_CARD_PATH)
-    return model, scaler, ood_detector, model_card
+    bundle = load_runtime_bundle()
+    return (
+        bundle.model,
+        bundle.scaler,
+        bundle.ood_detector,
+        bundle.model_card,
+        dict(bundle.thresholds),
+    )
 
 
-def predict_realtime_native(snapshot_path=DEFAULT_REALTIME_SNAPSHOT):
-    model, scaler, ood_detector, model_card = _load_assets()
+def predict_realtime_native(
+    snapshot_path=DEFAULT_REALTIME_SNAPSHOT,
+    *,
+    persist_history: bool = True,
+    as_of=None,
+):
+    """
+    ``persist_history=False`` + a pinned ``as_of`` together enable deterministic
+    replay: no CSV append, trend window pinned to ``as_of``.
+    """
+    model, scaler, ood_detector, model_card, thresholds = _load_assets()
 
-    engineered = build_realtime_native_features_from_file(snapshot_path=snapshot_path, persist_history=True)
+    engineered = build_realtime_native_features_from_file(
+        snapshot_path=snapshot_path, persist_history=persist_history, as_of=as_of,
+    )
     features = engineered.frame[REALTIME_NATIVE_FEATURES]
     scaled = scaler.transform(features)
     probability = float(model.predict_proba(scaled)[0, 1])
     ood_score = float(ood_detector.decision_function(scaled)[0])
     ood_label = int(ood_detector.predict(scaled)[0] == -1)
-    risk_level = _classify(probability)
+    risk_level = _classify(probability, thresholds)
 
     result = {
         "model_variant": "realtime_native",
@@ -108,6 +113,7 @@ def predict_realtime_native(snapshot_path=DEFAULT_REALTIME_SNAPSHOT):
         "risk_level": risk_level,
         "risk_interpretation": _risk_interpretation(risk_level, engineered.diagnostics),
         "recommended_action": _recommended_action(risk_level),
+        "risk_thresholds": thresholds,
         "ood_detection": {
             "method": "IsolationForest",
             "score": ood_score,
@@ -119,7 +125,17 @@ def predict_realtime_native(snapshot_path=DEFAULT_REALTIME_SNAPSHOT):
     }
 
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    with open(REPORTS_DIR / "latest_realtime_native_prediction.json", "w", encoding="utf-8") as file:
+    _report_path = REPORTS_DIR / "latest_realtime_native_prediction.json"
+    _tmp_path = _report_path.with_suffix(_report_path.suffix + ".tmp")
+    # Atomic write: serialize to a sibling tempfile then os.replace so a crash
+    # mid-write leaves the previous valid file in place and never a truncated JSON.
+    with open(_tmp_path, "w", encoding="utf-8") as file:
         json.dump(result, file, ensure_ascii=False, indent=2)
+        file.flush()
+        try:
+            os.fsync(file.fileno())
+        except OSError:
+            pass
+    os.replace(_tmp_path, _report_path)
 
     return json.loads(json.dumps(result, default=lambda value: float(value) if isinstance(value, np.generic) else value))

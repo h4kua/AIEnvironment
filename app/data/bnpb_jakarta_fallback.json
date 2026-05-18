@@ -1,0 +1,23 @@
+{
+  "_meta": {
+    "schema_version": "1",
+    "source": "static_fallback",
+    "purpose": "Last-resort BNPB IRBI vulnerability scores for DKI Jakarta kotamadya when the live InaRISK API is unreachable.",
+    "irbi_scale": "Normalised [0.0, 1.0] flood vulnerability index. 0.0 = lowest, 1.0 = highest.",
+    "population_source": "BPS 2020 census, rounded.",
+    "review_cadence_days": 365,
+    "last_reviewed": "2026-05-17",
+    "notes": [
+      "Used by app.services.bnpb_context.fetch_bnpb_data() when the live API returns empty or raises.",
+      "All scores were the operating defaults at the time this file was last reviewed; refresh whenever InaRISK publishes a new dataset."
+    ]
+  },
+  "districts": {
+    "Jakarta Utara":      {"irbi_flood_score": 0.72, "affected_population": 1780000},
+    "Jakarta Barat":      {"irbi_flood_score": 0.65, "affected_population": 2400000},
+    "Jakarta Timur":      {"irbi_flood_score": 0.61, "affected_population": 3030000},
+    "Jakarta Pusat":      {"irbi_flood_score": 0.58, "affected_population": 1060000},
+    "Jakarta Selatan":    {"irbi_flood_score": 0.52, "affected_population": 2230000},
+    "Kepulauan Seribu":   {"irbi_flood_score": 0.45, "affected_population": 28000}
+  }
+}
