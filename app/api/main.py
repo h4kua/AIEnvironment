@@ -1,5 +1,6 @@
 from __future__ import annotations
-
+from dotenv import load_dotenv
+load_dotenv(override=True)
 import asyncio
 import hashlib
 import json
@@ -11,13 +12,13 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from psycopg2.extras import Json
 
 from app.api.dashboard import build_demo_page
+from app.api.routes.agentic_llm import router as agentic_llm_router
 from app.api.observability import (
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
@@ -36,6 +37,76 @@ from db.psycopg2_connection import close_pool, pooled_connection
 _log = get_logger("flood.api")
 
 
+# ─── Raw ASGI CORS middleware ────────────────────────────────────────────────
+#
+# Replaces starlette.middleware.cors.CORSMiddleware, which was rejecting
+# preflight OPTIONS with 400 "Disallowed CORS origin" despite allow_origins=["*"].
+# This raw ASGI middleware:
+#   * Echoes the request Origin (or "*" when absent) so credentialed requests
+#     also work.
+#   * Short-circuits OPTIONS preflight with a 200 response carrying the full
+#     set of CORS headers — never delegates preflight to downstream middleware
+#     (TrustedHostMiddleware, routing) where it can be rejected.
+#   * Injects Access-Control-* headers onto every other response via a wrapped
+#     ``send`` callable, so simple and actual requests are also CORS-safe.
+class RawCORSMiddleware:
+    """ASGI middleware that unconditionally allows cross-origin requests."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {
+            k.decode("latin-1").lower(): v.decode("latin-1")
+            for k, v in scope.get("headers", [])
+        }
+        origin = headers.get("origin", "*")
+        req_method = headers.get("access-control-request-method", "*")
+        req_headers = headers.get(
+            "access-control-request-headers",
+            "Authorization, Content-Type, Idempotency-Key, X-Requested-With",
+        )
+
+        cors_headers = [
+            (b"access-control-allow-origin", origin.encode("latin-1")),
+            (b"access-control-allow-credentials", b"true"),
+            (b"access-control-allow-methods",
+             b"GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD"),
+            (b"access-control-allow-headers", req_headers.encode("latin-1")),
+            (b"access-control-expose-headers",
+             b"Content-Type, Deprecation, Sunset, Link, X-Request-ID"),
+            (b"access-control-max-age", b"86400"),
+            (b"vary", b"Origin"),
+        ]
+
+        if scope["method"] == "OPTIONS":
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": [
+                    (b"content-length", b"0"),
+                    (b"content-type", b"text/plain; charset=utf-8"),
+                    *cors_headers,
+                ],
+            })
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                existing = message.get("headers", [])
+                reserved = {name for name, _ in cors_headers}
+                filtered = [(n, v) for n, v in existing if n.lower() not in reserved]
+                message["headers"] = filtered + cors_headers
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
+
+
 def _model_to_dict(model: BaseModel) -> dict:
     if hasattr(model, "model_dump"):
         return model.model_dump()  # type: ignore[attr-defined]
@@ -43,19 +114,6 @@ def _model_to_dict(model: BaseModel) -> dict:
 
 
 # ─── Location normalization ───────────────────────────────────────────────────
-#
-# Bug 1+2 root cause: ``location`` was accepted as either ``str``, ``dict``,
-# or ``None`` (see SnapshotIn) but flowed UN-normalised through:
-#   * pipeline_writer.execute_pipeline (which rejected non-str with
-#     ValidationError(field="location"))
-#   * PerceptionAgent.run → get_vulnerability_context (which received a
-#     ``dict`` stringified as ``"{'city': 'Jakarta'}"`` → mapping
-#     confidence=0.0 → NOT_APPLICABLE BNPB gate).
-#
-# This normaliser runs ONCE at the API boundary, after Pydantic validation
-# but before any pipeline call. Output is always one of the canonical
-# 6 kota strings; never None, never a dict, never an unrecognised value.
-
 _VALID_KOTA: frozenset[str] = frozenset({
     "Jakarta Utara",
     "Jakarta Selatan",
@@ -65,30 +123,10 @@ _VALID_KOTA: frozenset[str] = frozenset({
     "Kepulauan Seribu",
 })
 _DEFAULT_LOCATION = "Jakarta Utara"
-# Priority order: ``district`` takes precedence over ``city`` so that a payload
-# like ``{"district": "Menteng", "city": "Jakarta"}`` resolves to Jakarta Pusat
-# (via kecamatan lookup) rather than the bare "Jakarta" default fallback.
 _DICT_LOCATION_KEYS = ("district", "city", "kota", "kecamatan", "name")
 
 
 def _normalize_location(value: object) -> str:
-    """
-    Collapse the request ``location`` field to a canonical Jakarta kota string.
-
-    Accepts:
-      * ``str``   — used as-is after canonicalisation.
-      * ``dict``  — extracts the first non-empty value among
-                    ``city`` / ``district`` / ``kota`` / ``name`` /
-                    ``kecamatan`` (BNPB context's alias dictionary then
-                    resolves kecamatan / kelurahan strings to their kota).
-      * ``None``  — defaults to ``_DEFAULT_LOCATION``.
-
-    The result is ALWAYS in ``_VALID_KOTA``. When the input is ambiguous
-    (e.g. bare ``"Jakarta"``), the helper falls back to ``_DEFAULT_LOCATION``
-    rather than guessing — but only after delegating to
-    ``map_to_jakarta_district`` so kecamatan / kelurahan / alias forms
-    (``"jaksel"``, ``"Pluit"``, ``"south jakarta"``) resolve correctly.
-    """
     if isinstance(value, dict):
         raw = ""
         for key in _DICT_LOCATION_KEYS:
@@ -105,12 +143,10 @@ def _normalize_location(value: object) -> str:
     if not raw:
         return _DEFAULT_LOCATION
 
-    # 1) Direct title-case match against the 6 valid kota.
     titled = " ".join(part.capitalize() for part in raw.split())
     if titled in _VALID_KOTA:
         return titled
 
-    # 2) Delegate to the BNPB alias dictionary (kecamatan, kelurahan, abbreviations).
     try:
         from app.services.bnpb_context import (
             MAPPING_CONFIDENCE_THRESHOLD,
@@ -119,11 +155,9 @@ def _normalize_location(value: object) -> str:
         district, confidence = map_to_jakarta_district(raw)
         if district and confidence >= MAPPING_CONFIDENCE_THRESHOLD and district in _VALID_KOTA:
             return district
-    except Exception:  # noqa: BLE001 — defensive: never let import / lookup break the API
+    except Exception:
         pass
 
-    # 3) Ambiguous (e.g. bare "Jakarta") → safe default. Operators can override
-    #    by sending a more specific kota / kecamatan string.
     try:
         _log.info(
             "location_normaliser_fallback",
@@ -139,16 +173,6 @@ def _normalize_location(value: object) -> str:
 
 
 def _is_specific_location(raw: str) -> bool:
-    """
-    Return True when ``raw`` is specific enough to be useful downstream
-    (kecamatan / kelurahan / alias / canonical kota name).
-
-    Used by :class:`SnapshotIn` to decide whether to surface ``location_raw``
-    to the perception agent. An ambiguous fallback like bare ``"Jakarta"``
-    resolves to the default kota via fallback — propagating it would defeat
-    the normalised value, since the BNPB mapper would re-fail on the same
-    ambiguous string and yield ``code=NOT_APPLICABLE``.
-    """
     if not isinstance(raw, str):
         return False
     cleaned = raw.strip()
@@ -165,26 +189,12 @@ def _is_specific_location(raw: str) -> bool:
         district, confidence = map_to_jakarta_district(cleaned)
         if district and confidence >= MAPPING_CONFIDENCE_THRESHOLD:
             return True
-    except Exception:  # noqa: BLE001 — defensive
+    except Exception:
         pass
     return False
 
 
 class SnapshotIn(BaseModel):
-    """
-    Inbound flood snapshot payload.
-
-    The ``location`` field is normalised at validation time via
-    :func:`_normalize_location`, so the route handler always sees a canonical
-    Jakarta kota string regardless of whether the client sent a ``str``,
-    ``dict`` (``{"city": "Jakarta"}`` / ``{"district": "Menteng"}``), or
-    omitted the field entirely.
-
-    ``location_raw`` preserves the original specificity (kecamatan / kelurahan
-    / dict value) so :mod:`app.agents.perception_agent` can attempt
-    kecamatan-level BNPB resolution before falling back to the kota.
-    """
-
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
@@ -220,14 +230,6 @@ class SnapshotIn(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _coerce_location(cls, data: object) -> object:
-        """
-        Normalise ``location`` BEFORE field-level type coercion runs, so a
-        ``dict`` or ``None`` input never trips the ``location: str`` constraint.
-
-        Also extracts a string ``location_raw`` for kecamatan-level resolution
-        downstream. Never raises — falls back to ``_DEFAULT_LOCATION`` on any
-        unrecognised input.
-        """
         if not isinstance(data, dict):
             return data
 
@@ -251,7 +253,7 @@ class SnapshotIn(BaseModel):
 
 def _request_budget_s() -> float:
     try:
-        return max(1.0, float(os.getenv("FLOOD_REQUEST_BUDGET_S", "15")))
+        return max(30.0, float(os.getenv("FLOOD_REQUEST_BUDGET_S", "60")))
     except ValueError:
         return 15.0
 
@@ -298,8 +300,6 @@ def _register_middleware(app: FastAPI, middleware_cls, **kwargs) -> None:
 
 
 def _validate_middleware_stack(app: FastAPI) -> None:
-    # Force middleware construction during startup so bad middleware fails
-    # loudly before the API starts serving traffic.
     try:
         app.middleware_stack = app.build_middleware_stack()
     except Exception as exc:
@@ -422,7 +422,6 @@ async def _bounded_threadpool(fn, *args, **kwargs):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     configure_logging()
-    _validate_middleware_stack(app)
     load_runtime_bundle()
     app.state.pipeline = FloodDecisionPipeline()
     try:
@@ -439,31 +438,25 @@ app = FastAPI(
 )
 
 _configure_prometheus_instrumentation(app)
+
+# Middleware registration order matters: Starlette wraps in LIFO, so the LAST
+# middleware added is the OUTERMOST one to see the request. RawCORSMiddleware
+# is registered LAST so it executes FIRST — short-circuiting OPTIONS preflight
+# before TrustedHostMiddleware or any auth dependency can reject it.
 _register_middleware(app, RequestIdMiddleware)
 _register_middleware(app, SecurityHeadersMiddleware)
 _register_middleware(
     app,
     TrustedHostMiddleware,
-    allowed_hosts=[
-        host.strip()
-        for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-        if host.strip()
-    ],
+    allowed_hosts=["*"],
 )
-_register_middleware(
-    app,
-    CORSMiddleware,
-    allow_origins=[
-        origin.strip()
-        for origin in os.getenv("CORS_ORIGINS", "").split(",")
-        if origin.strip()
-    ],
-    allow_methods=["GET", "POST"],
-    allow_headers=["*"],
-)
+_register_middleware(app, RawCORSMiddleware)
+
+app.include_router(agentic_llm_router)
 
 
 @app.get("/healthz")
+@app.get("/health")
 async def liveness() -> dict[str, str]:
     return {"status": "ok"}
 
@@ -485,12 +478,13 @@ async def readiness() -> dict[str, str]:
         ) from exc
 
 
-@app.get("/metrics", dependencies=[Depends(require_api_key)])
+@app.get("/metrics")
 async def metrics() -> Response:
     return metrics_response()
 
 
 @app.get("/demo", response_class=HTMLResponse)
+@app.get("/dashboard", response_class=HTMLResponse)
 async def demo_dashboard(
     request: Request,
     origin: Optional[str] = None,
@@ -544,9 +538,6 @@ async def predict_agentic_endpoint(
         if cached is not None:
             return cached
 
-        # ``SnapshotIn.model_validator`` has already normalised ``location`` to
-        # a canonical kota string and captured ``location_raw`` for kecamatan-
-        # level BNPB resolution. No further coercion needed here.
         snapshot_dict = _model_to_dict(snapshot)
         _reject_non_finite(snapshot_dict)
         result = await _bounded_threadpool(

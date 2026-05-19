@@ -2,8 +2,8 @@
   "bundle_version": "2.0.0",
   "model_variant": "realtime_native",
   "schema_version": "2",
-  "created_at": "2026-05-18T05:38:43.239048+00:00",
-  "training_dataset_fingerprint": "sha256:f4d80333fcb383904d5d74ebea3371093a744393b1f07e67535d3c534c5fe435",
+  "created_at": "2026-05-18T16:55:23.870283+00:00",
+  "training_dataset_fingerprint": "sha256:a83f1cc3ebd492428f9a2a059138069e0f6ba1add63fdcd16df6673953e7d082",
   "feature_schema": {
     "feature_count": 16,
     "features": [
@@ -35,18 +35,18 @@
     "python": "3.12.10",
     "sklearn": "1.8.0",
     "xgboost": "3.2.0",
-    "joblib": "1.5.3",
-    "numpy": "2.4.4"
+    "joblib": "1.4.2",
+    "numpy": "1.26.4"
   },
   "sha256": {
-    "model.pkl": "be865c08568d2701e6d86c30408a0f8c860c8a30cb57f96f4cc57e5e35ab738a",
-    "scaler.pkl": "2ab1bd9d1994c734c3dc0e281edb283df9a9c794fc6c5da01aa4bdd5f270ced7",
-    "ood.pkl": "3129fee163e2ca3b33ba562a424b0cee701f88c84661b9ed4bfe1dda35f9359e",
-    "threshold.json": "578be9d8f75207f248449bb0e67b012542b1b4e0bdba94979009f0b596ff6a60",
-    "calibration.json": "2de272c507df9061e314335c84b80cc021e2854075917aa9ab16e7de15877217",
+    "model.pkl": "41dda66c22a4a103f9238ab53f9b9b262fb4a447e4bdffc1396ed62c661e5a1b",
+    "scaler.pkl": "e05f5972ffe8cb0d18ab2c7cc894f488e8e35ca3dc8e3ee86b7139762cad20c9",
+    "ood.pkl": "bb6400005ea862e4d61bc5c6acd12362b019e1f17486062f72c3685599f6520a",
+    "threshold.json": "1c34c1ec07e3353244e4fc522b1ed9b142a0f66aac0693894130c7f94d5dd561",
+    "calibration.json": "7d693f01e24723e3f5a818eba22fa91c6e191616e8ec6857946a0f555c81ec6b",
     "feature_list.json": "05147596e12c2fed5af930f2823903857a471d594e05aa5db28f6f5a72f59020",
-    "model_card.json": "ae2115fe9606358298ecf5501cdad5fdc8aff900bedf77d29256d4eec91e58e3",
-    "training_stats.json": "df4b988a03595e8c2a7fa5f6c00243448837b98fe444b9ad7e9c6c768fbdf5db",
-    "xgboost_model.json": "cd7d3967f20f060741e77c9d9caeb3b66517c07ee2684bddd812e05514577da3"
+    "model_card.json": "ff35b4ae98c023614a5b4cc077cab9b19af74f3234739aae41fbe6d2fd2d7063",
+    "training_stats.json": "bb46768761abd59f4d212b794c42804396f49c317f003a10990f3c123dde5f6a",
+    "xgboost_model.json": "e4bf3e97cf53f24f0ac156bf12f610e56a4174094f0b1d827134e439455556ef"
   }
 }

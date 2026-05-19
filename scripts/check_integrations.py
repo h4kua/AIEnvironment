@@ -17,10 +17,14 @@ from __future__ import annotations
 import os
 import sys
 import time
+from pathlib import Path
+
+# Load .env from project root (two levels up from scripts/)
+_ENV_PATH = Path(__file__).resolve().parent.parent / ".env"
 
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    load_dotenv(_ENV_PATH, override=True)
 except ImportError:
     pass
 
@@ -62,6 +66,7 @@ def check_postgres() -> CheckResult:
         conn = psycopg2.connect(
             host=host, port=int(port), dbname=dbname,
             user=user, password=password, connect_timeout=5,
+            sslmode="require",
         )
         conn.cursor().execute("SELECT 1")
         conn.close()
@@ -161,11 +166,14 @@ def main() -> int:
     print("=" * 64)
     print("  Flood AI -- Integration Healthcheck")
     print("=" * 64)
+    print(f"\n  .env loaded from: {_ENV_PATH}")
 
     print("\nConfigured secrets (masked):")
     for var in ("ANTHROPIC_API_KEY", "OPENWEATHER_API_KEY",
                 "GOOGLE_MAPS_API_KEY", "DB_PASSWORD"):
         print(f"  {var}={_mask(os.getenv(var, ''))}")
+
+    print(f"\n  DB_HOST={os.getenv('DB_HOST', '(not set)')}")
 
     print("\nChecking services...")
     results: list[CheckResult] = [

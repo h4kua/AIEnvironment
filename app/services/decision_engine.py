@@ -59,6 +59,7 @@ _AUTHORITY_TO_SOURCE = {
     DecisionAuthority.L0_PHYSICAL: "invalid_input_fallback",
     DecisionAuthority.L1_SIAGA:    "physical_override",
     DecisionAuthority.L1_5_MULTI:  "signal_override",
+    DecisionAuthority.L1_7_BMKG_SAFETY_FLOOR: "bmkg_safety_floor",
     DecisionAuthority.L2_INTEGRITY: "system_guardrail",
     DecisionAuthority.L3_ML:       "ml_adaptive",
     DecisionAuthority.L4_TREND:    "trend_informed",
@@ -383,11 +384,23 @@ def _build_canonical_inputs(kw: dict) -> dict:
         if signals.get("_rainfall_mm") is not None
         else signals.get("rainfall_mm") or 0.0
     )
-    bmkg_max_severity = float(
-        signals.get("_bmkg_weighted")
-        if signals.get("_bmkg_weighted") is not None
-        else signals.get("bmkg_severity") or 0.0
-    )
+    # Source the L1.5/L1.7 BMKG scalar from RAW max severity (0.8 for "Severe",
+    # 1.0 for "Extreme") — not the multiplicative weighted score, which
+    # collapses any Severe alert without Observed+Immediate metadata to a
+    # sub-0.80 value and silently disables the L1.7 BMKG_SAFETY_FLOOR.
+    # Fallback chain preserves backward compatibility:
+    #   1. _bmkg_severity        (extract_signals scalar — preferred)
+    #   2. bmkg_severity_score   (raw features key — bypass path)
+    #   3. _bmkg_weighted        (legacy product — last-resort)
+    #   4. bmkg_severity         (legacy fallback name)
+    _bmkg_sev_raw = signals.get("_bmkg_severity")
+    if _bmkg_sev_raw is None:
+        _bmkg_sev_raw = signals.get("bmkg_severity_score")
+    if _bmkg_sev_raw is None:
+        _bmkg_sev_raw = signals.get("_bmkg_weighted")
+    if _bmkg_sev_raw is None:
+        _bmkg_sev_raw = signals.get("bmkg_severity") or 0.0
+    bmkg_max_severity = float(_bmkg_sev_raw)
 
     perception = PerceptionInputs(
         physically_plausible=not has_critical_violation,
@@ -398,10 +411,31 @@ def _build_canonical_inputs(kw: dict) -> dict:
         bmkg_max_severity=max(0.0, min(1.0, bmkg_max_severity)),
     )
 
+    # Extract OOD score from failure_modes (IsolationForest decision_function;
+    # negative = out-of-distribution). Required by L1.7 sub-rule (b)
+    # "bmkg_severe_ood_stale_tma" — without this, reasoning.ood_score stays at
+    # its 0.0 default and that sub-rule can never fire.
+    ood_score_value = 0.0
+    for f in kw.get("failure_modes") or []:
+        if isinstance(f, dict) and f.get("type") == "ood_input":
+            detail = f.get("detail") or {}
+            try:
+                ood_score_value = float(detail.get("ood_score", 0.0))
+            except (TypeError, ValueError):
+                ood_score_value = 0.0
+            break
+    if ood_score_value == 0.0:
+        diag_ood = (kw.get("diagnostics") or {}).get("ood_detection") or {}
+        try:
+            ood_score_value = float(diag_ood.get("score", 0.0))
+        except (TypeError, ValueError):
+            ood_score_value = 0.0
+
     reasoning = ReasoningInputs(
         probability=float(kw.get("probability") or 0.0),
         confidence=float(kw.get("adjusted_confidence") or 0.0),
         model_variant="realtime_native",
+        ood_score=ood_score_value,
     )
 
     failures: list[CanonicalFailureMode] = []

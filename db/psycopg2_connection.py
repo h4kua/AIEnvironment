@@ -16,8 +16,10 @@ from psycopg2.extensions import connection as PgConnection
 from psycopg2.pool import ThreadedConnectionPool
 
 if os.getenv("FLOOD_LOAD_DOTENV", "1") == "1":
-    load_dotenv()
+    from pathlib import Path
+    load_dotenv(Path(__file__).resolve().parent.parent / "app" / ".env", override=True)
 
+DB_HOST = os.getenv("DB_HOST")
 
 def _required_password() -> str:
     password = os.getenv("DB_PASSWORD")
@@ -91,13 +93,7 @@ def _init_pool(config: Psycopg2ConnectionConfig) -> ThreadedConnectionPool:
                 _POOL = ThreadedConnectionPool(
                     minconn=int(os.getenv("DB_POOL_MIN", "2")),
                     maxconn=int(os.getenv("DB_POOL_MAX", "20")),
-                    host=config.host,
-                    port=config.port,
-                    dbname=config.database,
-                    user=config.user,
-                    password=config.password,
-                    connect_timeout=config.connect_timeout,
-                    application_name=config.application_name,
+                    dsn=f"postgresql://{config.user}:{config.password}@{config.host}:{config.port}/{config.database}?sslmode=require&connect_timeout={config.connect_timeout}&application_name={config.application_name}"
                 )
     return _POOL
 
@@ -142,13 +138,7 @@ def get_psycopg2_connection(
     """
     active_config = config or Psycopg2ConnectionConfig()
     connection = psycopg2.connect(
-        host=active_config.host,
-        port=active_config.port,
-        dbname=active_config.database,
-        user=active_config.user,
-        password=active_config.password,
-        connect_timeout=active_config.connect_timeout,
-        application_name=active_config.application_name,
-    )
+    f"postgresql://{active_config.user}:{active_config.password}@{active_config.host}:{active_config.port}/{active_config.database}?sslmode=require&connect_timeout={active_config.connect_timeout}&application_name={active_config.application_name}"
+)
     connection.autocommit = False
     return connection

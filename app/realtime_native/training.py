@@ -58,6 +58,13 @@ OOD_CONFIDENCE_FLOOR = float(os.getenv("FLOOD_OOD_CONFIDENCE_FLOOR", "0.6"))
 # human-review queue rather than fed to the trainer.
 PSEUDO_LABEL_CONFIDENCE_MIN = float(os.getenv("FLOOD_PSEUDO_LABEL_CONFIDENCE_MIN", "0.6"))
 
+# Minimum positive (flood=1) samples required in each of the val/test folds
+# for the chronological holdout split to be considered viable. When the
+# bootstrap dataset has too few positives near the chronological tail (a
+# common cold-start condition), the trainer falls back to a shuffled random
+# split instead of raising — production retrain must never hard-fail here.
+FLOOD_RETRAIN_MIN_POSITIVES = int(os.getenv("FLOOD_RETRAIN_MIN_POSITIVES", "1"))
+
 # Time-decay half-life for sample weighting. weight = 0.5 ** (age_days / HL).
 TIME_DECAY_HALF_LIFE_DAYS = float(os.getenv("FLOOD_TIME_DECAY_HALF_LIFE_DAYS", "14"))
 
@@ -387,11 +394,48 @@ def train_realtime_native_model(dataset_path=REALTIME_NATIVE_BOOTSTRAP_DATASET_P
     X_train, X_val = X_dev.iloc[:val_split_idx], X_dev.iloc[val_split_idx:]
     y_train, y_val = y_dev.iloc[:val_split_idx], y_dev.iloc[val_split_idx:]
 
-    if y_train.sum() < 30 or y_val.sum() < 5 or y_test.sum() < 10:
-        raise RuntimeError(
-            "Insufficient positives per fold "
-            f"(train={int(y_train.sum())}, val={int(y_val.sum())}, test={int(y_test.sum())})."
+    val_positives = int(y_val.sum())
+    test_positives = int(y_test.sum())
+    train_positives = int(y_train.sum())
+    if (
+        val_positives < FLOOD_RETRAIN_MIN_POSITIVES
+        or test_positives < FLOOD_RETRAIN_MIN_POSITIVES
+    ):
+        logger.warning(
+            "insufficient_positives_using_random_split "
+            "(train=%d, val=%d, test=%d, min_required=%d)",
+            train_positives,
+            val_positives,
+            test_positives,
+            FLOOD_RETRAIN_MIN_POSITIVES,
         )
+        from sklearn.model_selection import train_test_split
+
+        total_pos = int(y.sum())
+        total_neg = int(len(y) - total_pos)
+        stratify_all = y if total_pos >= 2 and total_neg >= 2 else None
+        try:
+            X_dev, X_test, y_dev, y_test = train_test_split(
+                X, y, test_size=0.20, random_state=42,
+                shuffle=True, stratify=stratify_all,
+            )
+        except ValueError:
+            X_dev, X_test, y_dev, y_test = train_test_split(
+                X, y, test_size=0.20, random_state=42, shuffle=True,
+            )
+
+        dev_pos = int(y_dev.sum())
+        dev_neg = int(len(y_dev) - dev_pos)
+        stratify_dev = y_dev if dev_pos >= 2 and dev_neg >= 2 else None
+        try:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_dev, y_dev, test_size=0.15, random_state=42,
+                shuffle=True, stratify=stratify_dev,
+            )
+        except ValueError:
+            X_train, X_val, y_train, y_val = train_test_split(
+                X_dev, y_dev, test_size=0.15, random_state=42, shuffle=True,
+            )
 
     scaler = StandardScaler()
     X_train_s = scaler.fit_transform(X_train)

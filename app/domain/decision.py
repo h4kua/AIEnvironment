@@ -137,6 +137,26 @@ _EARLY_WARN_RAIN_3H_MIN = 20.0
 _EARLY_WARN_WATER_DELTA_MIN = 0.06
 _EARLY_WARN_DATA_POINTS_MIN = 2
 
+# ---------------------------------------------------------------------------
+# L1.7 BMKG_SAFETY_FLOOR — non-bypassable WARNING floor for BMKG-severe gaps.
+# ---------------------------------------------------------------------------
+# Fires when BMKG reports Severe+Observed+Immediate (severity score >= 0.80)
+# AND at least one of:
+#   (a) measured rainfall is already in the "high" band (>= 20mm/h), which
+#       L1.5 alone does not catch (L1.5 needs rainfall >= 60mm/h paired with
+#       another extreme signal).
+#   (b) the ML model is out-of-distribution AND water-level data is unusable
+#       (max_water_level_ratio == 0.0 indicates the hydrology channel is
+#       stale / absent). In this state ML SAFE cannot be trusted: the
+#       inconsistency-override (L3.3) won't fire either because it needs
+#       hydrology_max_severity >= 0.75, which a stale channel can't produce.
+#
+# When fired, escalates the decision to WARNING with confidence floor 0.50,
+# pre-empting L3 ML entirely. Authority = L1_7_BMKG_SAFETY_FLOOR (forensic).
+_BMKG_SAFETY_FLOOR_SEVERITY_MIN = 0.80
+_BMKG_SAFETY_FLOOR_RAIN_MIN = 20.0
+_BMKG_SAFETY_FLOOR_CONFIDENCE_FLOOR = 0.50
+
 
 # ---------------------------------------------------------------------------
 # Output (typed, immutable)
@@ -328,6 +348,27 @@ def _check_early_warning_convergence(
     return True
 
 
+def _check_bmkg_safety_floor(
+    perception: PerceptionInputs,
+    reasoning: ReasoningInputs,
+) -> tuple[bool, str]:
+    """
+    L1.7: BMKG-severe + (high-rainfall OR OOD+stale-TMA) -> WARNING floor.
+
+    Returns ``(fired, sub_rule)`` where ``sub_rule`` is one of
+    ``"bmkg_severe_high_rainfall"`` or ``"bmkg_severe_ood_stale_tma"`` when
+    fired, and ``""`` otherwise. The sub-rule is recorded in the decision
+    trace so operators can see *why* the floor engaged.
+    """
+    if perception.bmkg_max_severity < _BMKG_SAFETY_FLOOR_SEVERITY_MIN:
+        return False, ""
+    if perception.rainfall_1h_mm >= _BMKG_SAFETY_FLOOR_RAIN_MIN:
+        return True, "bmkg_severe_high_rainfall"
+    if reasoning.ood_score < 0.0 and perception.max_water_level_ratio == 0.0:
+        return True, "bmkg_severe_ood_stale_tma"
+    return False, ""
+
+
 def _check_pre_alert_trend(
     base_risk: RiskLevel,
     reasoning: ReasoningInputs,
@@ -493,6 +534,42 @@ def decide(
             authority=DecisionAuthority.L1_SIAGA,
             confidence=max(reasoning.confidence, 0.80),
             driver=Driver.HYDROLOGY_STRESS,
+            ml_execution_mode="FULL",
+            is_safe_for_automation=False,
+            decision_trace=tuple(decision_trace),
+        )
+
+    # ------------------------------------------------------------------ L1.7
+    # BMKG_SAFETY_FLOOR: non-bypassable WARNING floor that pre-empts ML when
+    # BMKG reports Severe+Observed+Immediate alongside either (a) high
+    # rainfall or (b) an out-of-distribution ML signal with no usable water
+    # level. Closes the gap where ML SAFE + stale TMA + BMKG severe would
+    # otherwise fall through every downstream layer.
+    fired, sub_rule = _check_bmkg_safety_floor(perception, reasoning)
+    if fired:
+        decision_trace.append(_trace(
+            DecisionAuthority.L1_7_BMKG_SAFETY_FLOOR,
+            inputs={
+                "bmkg_max_severity": perception.bmkg_max_severity,
+                "rainfall_1h_mm": perception.rainfall_1h_mm,
+                "max_water_level_ratio": perception.max_water_level_ratio,
+                "ood_score": reasoning.ood_score,
+                "ml_probability": reasoning.probability,
+                "sub_rule": sub_rule,
+            },
+            outputs={
+                "risk": RiskLevel.WARNING.value,
+                "reason": DecisionReason.SAFETY_FLOOR.value,
+                "override": "bmkg_safety_floor",
+            },
+        ))
+        return Decision(
+            risk_level=RiskLevel.WARNING,
+            system_status=_resolve_system_status(failures, perception),
+            reason=DecisionReason.SAFETY_FLOOR,
+            authority=DecisionAuthority.L1_7_BMKG_SAFETY_FLOOR,
+            confidence=max(reasoning.confidence, _BMKG_SAFETY_FLOOR_CONFIDENCE_FLOOR),
+            driver=Driver.BMKG_CONFIRMED_ALERT,
             ml_execution_mode="FULL",
             is_safe_for_automation=False,
             decision_trace=tuple(decision_trace),

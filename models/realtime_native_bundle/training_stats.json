@@ -1,24 +1,24 @@
 {
-  "dataset_path": "D:\\Buat Lomba\\data\\processed\\realtime_native_training_incremental_20260518T000000Z.csv",
+  "dataset_path": "D:\\Buat Lomba\\Buat Lomba\\data\\processed\\realtime_native_training_bootstrap.csv",
   "feature_count": 16,
-  "training_rows": 2946,
-  "validation_rows": 521,
-  "test_rows": 867,
+  "training_rows": 1990,
+  "validation_rows": 352,
+  "test_rows": 586,
   "performance": {
-    "optimal_threshold": 0.13496493901452683,
-    "train_accuracy": 0.8818737270875764,
-    "test_accuracy": 1.0,
-    "test_precision": 1.0,
-    "test_recall": 1.0,
-    "test_f1": 1.0,
-    "test_roc_auc": 1.0,
-    "validation_recall_at_threshold": 1.0,
-    "validation_precision_at_threshold": 0.9254901960784314
+    "optimal_threshold": 0.24204986294110617,
+    "train_accuracy": 0.9487437185929648,
+    "test_accuracy": 0.8822525597269625,
+    "test_precision": 0.3968253968253968,
+    "test_recall": 0.44642857142857145,
+    "test_f1": 0.42016806722689076,
+    "test_roc_auc": 0.8629043126684636,
+    "validation_recall_at_threshold": 0.5882352941176471,
+    "validation_precision_at_threshold": 0.5128205128205128
   },
   "calibration": {
-    "method": "sigmoid_fallback",
-    "test_brier": 0.3433927614288451,
-    "test_ece": 0.11178174561155738
+    "method": "isotonic",
+    "test_brier": 0.06609983965641626,
+    "test_ece": 0.004010795192033257
   },
   "scientific_notes": {
     "training_mode": "bootstrap_proxy_until_realtime_history_available",

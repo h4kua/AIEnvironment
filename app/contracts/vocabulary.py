@@ -54,6 +54,7 @@ class DecisionReason(str, Enum):
     PHYSICAL_GATE = "PHYSICAL_GATE"
     MULTI_SIGNAL = "MULTI_SIGNAL"
     TREND_EXTENSION = "TREND_EXTENSION"
+    SAFETY_FLOOR = "SAFETY_FLOOR"
 
 
 class Driver(str, Enum):
@@ -84,6 +85,7 @@ class DecisionAuthority(str, Enum):
     L0_PHYSICAL = "L0_PHYSICAL"
     L1_SIAGA = "L1_SIAGA"
     L1_5_MULTI = "L1_5_MULTI"
+    L1_7_BMKG_SAFETY_FLOOR = "L1_7_BMKG_SAFETY_FLOOR"
     L2_INTEGRITY = "L2_INTEGRITY"
     L3_ML = "L3_ML"
     L4_TREND = "L4_TREND"

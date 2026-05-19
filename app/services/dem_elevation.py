@@ -42,7 +42,7 @@ ELEVATION_ZONES = {
 
 TILE_REGISTRY = {
     "DEMNAS_1209-43": {
-        "path": r"D:\Buat Lomba\demnas\DEMNAS_1209-43_v1_0.tif",
+        "path": str(_DEFAULT_DEM_DIR / "DEMNAS_1209-43_v1.0.tif"),
         "bbox": {"lon_min": 106.50, "lon_max": 106.75, "lat_min": -6.25, "lat_max": -6.00},
         "origin": (106.50, -6.00),
         "pixel_deg": 7.500750075007501e-05,
@@ -51,7 +51,7 @@ TILE_REGISTRY = {
         "strip_offset": None,
     },
     "DEMNAS_1209-44": {
-        "path": r"D:\Buat Lomba\demnas\DEMNAS_1209-44_v1_0.tif",
+        "path": str(_DEFAULT_DEM_DIR / "DEMNAS_1209-44_v1.0.tif"),
         "bbox": {"lon_min": 106.75, "lon_max": 107.00, "lat_min": -6.25, "lat_max": -6.00},
         "origin": (106.75, -6.00),
         "pixel_deg": 7.500750075007501e-05,
@@ -60,7 +60,7 @@ TILE_REGISTRY = {
         "strip_offset": None,
     },
     "DEMNAS_1209-42": {
-        "path": r"D:\Buat Lomba\demnas\DEMNAS_1209-42_v1_0.tif",
+        "path": str(_DEFAULT_DEM_DIR / "DEMNAS_1209-42_v1.0.tif"),
         "bbox": {"lon_min": 106.75, "lon_max": 107.00, "lat_min": -6.50, "lat_max": -6.25},
         "origin": (106.75, -6.25),
         "pixel_deg": 7.500750075007501e-05,

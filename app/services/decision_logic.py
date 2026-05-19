@@ -57,6 +57,7 @@ def extract_signals(features: dict, plausibility_score: float = 1.0) -> dict:
     roll3 = features.get("rainfall_roll3_mean", 0.0) or 0.0
     humidity = features.get("humidity_pct", 0.0) or 0.0
     bwt = features.get("bmkg_weighted_score", 0.0) or 0.0
+    bsev = features.get("bmkg_severity_score", 0.0) or 0.0
     bcert = features.get("bmkg_certainty_score", 0.0) or 0.0
     burgency = features.get("bmkg_urgency_score", 0.0) or 0.0
     wrat = features.get("water_level_ratio", 0.0) or 0.0
@@ -105,6 +106,12 @@ def extract_signals(features: dict, plausibility_score: float = 1.0) -> dict:
         "_water_level_ratio": wrat,
         "_water_delta": wdelta,
         "_bmkg_weighted": bwt,
+        # Raw max BMKG severity weight (0.8 for "Severe", 1.0 for "Extreme") —
+        # distinct from _bmkg_weighted, which multiplies by certainty/urgency
+        # and so dilutes a Severe alert with non-Observed/non-Immediate metadata.
+        # Consumed by decision_engine._build_canonical_inputs to drive the L1.7
+        # BMKG_SAFETY_FLOOR floor on the raw severity scale, not the product.
+        "_bmkg_severity": bsev,
         "_humidity": humidity,
         "_hmi": hmi,
         "_roll3": roll3,

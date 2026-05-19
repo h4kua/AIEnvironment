@@ -246,6 +246,12 @@ class FloodDecisionPipeline:
         try:
             perception = _run_stage("perception", self._perception.run, snapshot, now=now_utc)
         except Exception as exc:
+            _log.error(
+                "STAGE_FAILED stage=perception type=%s msg=%s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             return self._emergency_output(
                 f"PerceptionAgent failed: {exc}", exc=exc, failure_stage="perception", now=now_utc,
             )
@@ -255,7 +261,7 @@ class FloodDecisionPipeline:
         # Canonical decision still runs and computes risk via L0 physical guard.
         plausibility_dict = getattr(perception, "plausibility", {}) or {}
         has_critical_violation = bool(plausibility_dict.get("has_critical_violation", False))
-        
+
         if has_critical_violation:
             # Build minimal ReasoningResult with failure_modes pre-populated.
             # EvaluationAgent + canonical decision will handle risk escalation.
@@ -286,6 +292,7 @@ class FloodDecisionPipeline:
             _bypass_features = {
                 "rainfall_mm": _rf_mm,
                 "bmkg_weighted_score": _bmkg_scores["bmkg_weighted_score"],
+                "bmkg_severity_score": _bmkg_scores["bmkg_severity_score"],
                 "water_level_ratio": _hydro_max_ratio,
                 "water_level_delta": 0.0,
                 "rainfall_roll3_mean": _rf_mm,
@@ -298,6 +305,10 @@ class FloodDecisionPipeline:
             _bypass_signals = {
                 "_rainfall_mm": _rf_mm,
                 "_bmkg_weighted": float(_bmkg_scores["bmkg_weighted_score"]),
+                # Raw max BMKG severity weight — drives L1.7 BMKG_SAFETY_FLOOR
+                # in the canonical decision adapter. Without this, the bypass
+                # path silently falls back to the diluted weighted product.
+                "_bmkg_severity": float(_bmkg_scores["bmkg_severity_score"]),
                 "_water_level_ratio": _hydro_max_ratio,
                 "_sensor_trusted": False,
             }
@@ -341,6 +352,12 @@ class FloodDecisionPipeline:
                     perception, persist_history=persist_history, as_of=now_utc,
                 )
             except Exception as exc:
+                _log.error(
+                    "STAGE_FAILED stage=reasoning type=%s msg=%s",
+                    type(exc).__name__,
+                    exc,
+                    exc_info=True,
+                )
                 return self._emergency_output(
                     f"ReasoningAgent failed: {exc}", exc=exc, failure_stage="reasoning", now=now_utc,
                 )
@@ -348,6 +365,12 @@ class FloodDecisionPipeline:
         try:
             evaluation = _run_stage("evaluation", self._evaluation.run, reasoning, perception)
         except Exception as exc:
+            _log.error(
+                "STAGE_FAILED stage=evaluation type=%s msg=%s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             return self._emergency_output(
                 f"EvaluationAgent failed: {exc}", exc=exc, failure_stage="evaluation", now=now_utc,
             )
@@ -355,6 +378,12 @@ class FloodDecisionPipeline:
         try:
             result = _run_stage("action", self._action.run, evaluation, now=now_utc)
         except Exception as exc:
+            _log.error(
+                "STAGE_FAILED stage=action type=%s msg=%s",
+                type(exc).__name__,
+                exc,
+                exc_info=True,
+            )
             return self._emergency_output(
                 f"ActionAgent failed: {exc}", exc=exc, failure_stage="action", now=now_utc,
             )
@@ -399,6 +428,7 @@ class FloodDecisionPipeline:
                 routing_correlation_id,
                 type(exc).__name__,
                 exc,
+                exc_info=True,
             )
             result["safe_route"] = {
                 "available": False,

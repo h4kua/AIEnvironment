@@ -19,7 +19,7 @@ Cron example (every hour at :05):
 Windows Task Scheduler:
     Program:  python
     Arguments: scripts\\run_jakarta_satu_ingest.py
-    Start in: D:\\Buat Lomba
+    Start in: D:\\FloodAI
 """
 
 from __future__ import annotations

@@ -508,6 +508,7 @@ def test_decision_source_values_are_stable():
         "invalid_input_fallback",
         "physical_override",
         "signal_override",
+        "bmkg_safety_floor",
         "system_guardrail",
         "ml_adaptive",
         "trend_informed",

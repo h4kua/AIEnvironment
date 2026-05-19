@@ -28,7 +28,15 @@
       "Bash(python -c \"from app.api.main import SnapshotIn; s = SnapshotIn\\(fetched_at_utc='x', location={'city': 'Jakarta'}\\); print\\('city-Jakarta:', s.location, '|', s.location_raw\\); s2 = SnapshotIn\\(fetched_at_utc='x', location={'district': 'Menteng'}\\); print\\('district-Menteng:', s2.location, '|', s2.location_raw\\); s3 = SnapshotIn\\(fetched_at_utc='x'\\); print\\('none:', s3.location, '|', s3.location_raw\\); s4 = SnapshotIn\\(fetched_at_utc='x', location='jakarta selatan'\\); print\\('str-lower:', s4.location, '|', s4.location_raw\\); s5 = SnapshotIn\\(fetched_at_utc='x', location='Jakarta'\\); print\\('bare-Jakarta:', s5.location, '|', s5.location_raw\\); s6 = SnapshotIn\\(fetched_at_utc='x', location={'city': 'jakarta utara'}\\); print\\('city-lower:', s6.location, '|', s6.location_raw\\)\")",
       "Bash(python -m pytest tests/test_location_normalizer.py --tb=short -q)",
       "Bash(python -m pytest tests/integration/test_flood_pipeline.py::test_pipeline_returns_required_keys -x --tb=long)",
-      "Bash(python -c 'from app.api.main import app; print\\('\\\\''app import OK'\\\\''\\); from fastapi.testclient import TestClient *)"
+      "Bash(python -c 'from app.api.main import app; print\\('\\\\''app import OK'\\\\''\\); from fastapi.testclient import TestClient *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/run_migration.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import app.api.main; import app.agents.llm_orchestrator; import app.api.routes.agentic_llm; print\\('OK imports'\\)\")",
+      "Bash(.venv/Scripts/python.exe -c \"import app.agents.llm_orchestrator as m; import app.api.routes.agentic_llm as r; import app.api.main; print\\('OK', r.router.routes[0].path\\)\")",
+      "Bash(.venv/Scripts/python.exe -m pytest tests/test_agentic_explain.py -v)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(curl -s -o nul -w \"health: %{http_code}\\\\n\" http://localhost:8000/healthz)",
+      "Bash(curl -s -i -X OPTIONS http://localhost:8000/predict/agentic/explain -H \"Origin: http://localhost:5173\" -H \"Access-Control-Request-Method: POST\" -H \"Access-Control-Request-Headers: content-type,x-api-key\")"
     ]
   }
 }

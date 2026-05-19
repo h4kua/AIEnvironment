@@ -1,7 +1,7 @@
 """API authentication and lightweight per-key rate limiting."""
 
 from __future__ import annotations
-
+from fastapi import Header, HTTPException, Request
 import os
 import time
 from collections import defaultdict, deque
@@ -30,8 +30,10 @@ def _rate_limit() -> int:
         return _DEFAULT_LIMIT
 
 
-def require_api_key(x_api_key: str = Header(default="")) -> str:
+def require_api_key(request: Request, x_api_key: str = Header(default="")) -> str:
     """Require a configured API key and enforce a deque-backed rate limit."""
+    if request.method == "OPTIONS":
+        return ""
     keys = _api_keys()
     if not keys:
         raise HTTPException(status_code=503, detail="api_not_configured")

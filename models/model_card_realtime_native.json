@@ -19,16 +19,16 @@
     "hydro_meteorological_index",
     "monsoon_season"
   ],
-  "training_dataset": "D:\\Buat Lomba\\data\\processed\\realtime_native_training_incremental_20260518T000000Z.csv",
-  "report_path": "D:\\Buat Lomba\\artifacts\\reports\\realtime_native_model_report.json",
-  "threshold_path": "D:\\Buat Lomba\\models\\optimal_threshold_realtime_native.json",
-  "operating_threshold": 0.13496493901452683,
-  "calibration_method": "sigmoid_fallback",
+  "training_dataset": "D:\\Buat Lomba\\Buat Lomba\\data\\processed\\realtime_native_training_bootstrap.csv",
+  "report_path": "D:\\Buat Lomba\\Buat Lomba\\artifacts\\reports\\realtime_native_model_report.json",
+  "threshold_path": "D:\\Buat Lomba\\Buat Lomba\\models\\optimal_threshold_realtime_native.json",
+  "operating_threshold": 0.24204986294110617,
+  "calibration_method": "isotonic",
   "confidence_floor_on_outlier": 0.6,
   "ood_detector": {
     "algorithm": "IsolationForest",
     "n_estimators": 200,
-    "contamination": 0.02987101154107264,
+    "contamination": 0.03015075376884422,
     "contamination_source": "observed_anomaly_rate"
   }
 }
